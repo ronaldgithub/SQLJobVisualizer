@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:SQLJobVisualizer.Controls"
+        x:Class="SQLJobVisualizer.MainWindow"
+        Title="SQL Job Visualizer"
+        Background="{DynamicResource BackgroundBrush}"
+        Width="1400" Height="820"
+        MinWidth="900" MinHeight="600">
+
+    <TabControl Background="{DynamicResource BackgroundBrush}"
+                Padding="0">
+        <TabItem Header="Week Overview">
+            <controls:WeekMatrixControl />
+        </TabItem>
+        <TabItem Header="Day Detail">
+            <controls:DayDetailControl />
+        </TabItem>
+    </TabControl>
+
+</Window>

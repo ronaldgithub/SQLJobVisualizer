@@ -1,0 +1,66 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SQLJobVisualizer.Controls.WeekMatrixControl">
+
+    <DockPanel Background="{DynamicResource BackgroundBrush}">
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BackgroundDarkBrush}"
+                Padding="8,6"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="PrevWeekButton" Content="◀ Prev" />
+                <TextBlock x:Name="WeekLabel"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource ForegroundBrush}"
+                           FontSize="13"
+                           MinWidth="230"
+                           TextAlignment="Center"/>
+                <Button x:Name="NextWeekButton" Content="Next ▶" />
+                <Button x:Name="RefreshButton" Content="⟳ Refresh" Margin="16,0,0,0" />
+                <StackPanel x:Name="ServerStatusPanel"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            Margin="20,0,0,0"
+                            VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Labels column + scrollable matrix -->
+        <Grid ColumnDefinitions="200,*">
+
+            <!-- Left: row labels -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource BackgroundDarkBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <StackPanel>
+                    <!-- Spacer matching canvas header height -->
+                    <Border Height="42"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="6,0,0,4">
+                        <TextBlock Text="Job / Server"
+                                   VerticalAlignment="Bottom"
+                                   Foreground="{DynamicResource ForegroundBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"/>
+                    </Border>
+                    <StackPanel x:Name="LabelPanel" />
+                </StackPanel>
+            </Border>
+
+            <!-- Right: scrollable canvas -->
+            <ScrollViewer Grid.Column="1"
+                          x:Name="MatrixScroll"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Hidden">
+                <Canvas x:Name="MatrixCanvas" />
+            </ScrollViewer>
+
+        </Grid>
+    </DockPanel>
+
+</UserControl>

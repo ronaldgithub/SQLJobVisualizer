@@ -1,0 +1,60 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SQLJobVisualizer.Controls.DayDetailControl">
+
+    <DockPanel Background="{DynamicResource BackgroundBrush}">
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BackgroundDarkBrush}"
+                Padding="8,6"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="Date:" VerticalAlignment="Center"
+                           Foreground="{DynamicResource ForegroundBrush}" FontSize="13"/>
+                <CalendarDatePicker x:Name="DatePicker" />
+                <Button x:Name="RefreshButton" Content="⟳ Refresh" Margin="8,0,0,0" />
+                <StackPanel x:Name="ServerStatusPanel"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            Margin="20,0,0,0"
+                            VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Labels column + scrollable canvas -->
+        <Grid ColumnDefinitions="200,*">
+
+            <!-- Left: row labels -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource BackgroundDarkBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <StackPanel>
+                    <Border Height="30"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="6,0,0,4">
+                        <TextBlock Text="Job / Server"
+                                   VerticalAlignment="Bottom"
+                                   Foreground="{DynamicResource ForegroundBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"/>
+                    </Border>
+                    <StackPanel x:Name="LabelPanel" />
+                </StackPanel>
+            </Border>
+
+            <!-- Right: scrollable canvas -->
+            <ScrollViewer Grid.Column="1"
+                          x:Name="DayScroll"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Hidden">
+                <Canvas x:Name="DayCanvas" />
+            </ScrollViewer>
+
+        </Grid>
+    </DockPanel>
+
+</UserControl>
