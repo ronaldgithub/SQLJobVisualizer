@@ -66,13 +66,34 @@ public partial class WeekMatrixControl : UserControl
                     ? new SolidColorBrush(Color.Parse("#1E2530"))
                     : new SolidColorBrush(Color.Parse("#1A1D23")),
             };
-            border.Child = new TextBlock
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(120)));
+            grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
+
+            var jobTb = new TextBlock
             {
-                Text              = row.DisplayLabel,
+                Text              = row.ShortJobLabel,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize          = 10,
+                Foreground        = new SolidColorBrush(isGroupStart
+                    ? Color.Parse("#D0D2D8")
+                    : Color.Parse("#8A8FA0")),
+            };
+            var srvTb = new TextBlock
+            {
+                Text              = row.ServerName,
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize          = 10,
                 Foreground        = new SolidColorBrush(Color.Parse("#C8CAD0")),
+                FontWeight        = FontWeight.SemiBold,
             };
+            Grid.SetColumn(jobTb, 0);
+            Grid.SetColumn(srvTb, 1);
+            grid.Children.Add(jobTb);
+            grid.Children.Add(srvTb);
+
+            border.Child = grid;
             LabelPanel.Children.Add(border);
         }
     }
@@ -222,7 +243,9 @@ public partial class WeekMatrixControl : UserControl
         // Job slot rectangles
         foreach (var slot in slots)
         {
-            var color = slot.Success ? "#2ECC71" : "#E74C3C";
+            var color = !slot.EndTime.HasValue ? "#F39C12"
+                : slot.Success                 ? "#2ECC71"
+                :                                "#E74C3C";
             var rect  = new Rectangle
             {
                 Width   = CellW - 1,
@@ -235,6 +258,34 @@ public partial class WeekMatrixControl : UserControl
             ToolTip.SetTip(rect, BuildSlotTooltip(slot));
             MatrixCanvas.Children.Add(rect);
         }
+
+        if (slots.Count == 0)
+        {
+            var msg = new TextBlock
+            {
+                Text              = "No job data found for this week",
+                Foreground        = new SolidColorBrush(Color.Parse("#6B7280")),
+                FontSize          = 13,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            Canvas.SetLeft(msg, canvasW / 2 - 130);
+            Canvas.SetTop(msg, HeaderH + (totalRows * CellH) / 2.0 - 10);
+            MatrixCanvas.Children.Add(msg);
+        }
+
+        ScrollToCurrentDay();
+    }
+
+    private void ScrollToCurrentDay()
+    {
+        int dayOffset = (int)(DateTime.Today - _weekStart).TotalDays;
+        if (dayOffset < 0 || dayOffset > 6) return;
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            double x = Math.Max(0, dayOffset * 24 * CellW - 50);
+            MatrixScroll.Offset = new Vector(x, 0);
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     private void AddRect(double x, double y, double w, double h, string color, double opacity = 1.0)

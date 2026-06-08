@@ -53,13 +53,34 @@ public partial class DayDetailControl : UserControl
                     ? new SolidColorBrush(Color.Parse("#1E2530"))
                     : new SolidColorBrush(Color.Parse("#1A1D23")),
             };
-            border.Child = new TextBlock
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(120)));
+            grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
+
+            var jobTb = new TextBlock
             {
-                Text              = row.DisplayLabel,
+                Text              = row.ShortJobLabel,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize          = 10,
+                Foreground        = new SolidColorBrush(isGroupStart
+                    ? Color.Parse("#D0D2D8")
+                    : Color.Parse("#8A8FA0")),
+            };
+            var srvTb = new TextBlock
+            {
+                Text              = row.ServerName,
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize          = 10,
                 Foreground        = new SolidColorBrush(Color.Parse("#C8CAD0")),
+                FontWeight        = FontWeight.SemiBold,
             };
+            Grid.SetColumn(jobTb, 0);
+            Grid.SetColumn(srvTb, 1);
+            grid.Children.Add(jobTb);
+            grid.Children.Add(srvTb);
+
+            border.Child = grid;
             LabelPanel.Children.Add(border);
         }
     }
@@ -80,7 +101,7 @@ public partial class DayDetailControl : UserControl
             if (ct.IsCancellationRequested) return;
 
             var executions = BuildExecutions(entries, day);
-            RenderDay(executions);
+            RenderDay(executions, day);
             UpdateServerStatus(failedServers);
         }
         catch (OperationCanceledException) { }
@@ -99,27 +120,29 @@ public partial class DayDetailControl : UserControl
         var list = new List<JobExecution>();
         foreach (var entry in entries)
         {
-            if (entry.EndTime is null) continue; // skip still-running
-
             var jobLabel = JobParser.ParseJobLabel(entry.CommandType, entry.Command);
             if (jobLabel is null) continue;
 
             int rowIdx = ServerList.GetRowIndex(entry.ServerName, jobLabel);
             if (rowIdx < 0) continue;
 
+            // Still-running jobs: use current time as provisional end time
+            var endTime = entry.EndTime ?? DateTime.Now;
+
             list.Add(new JobExecution
             {
                 Row       = ServerList.AllRows[rowIdx],
                 RowIndex  = rowIdx,
                 StartTime = entry.StartTime,
-                EndTime   = entry.EndTime.Value,
+                EndTime   = endTime,
                 Success   = !entry.ErrorNumber.HasValue,
+                IsRunning = !entry.EndTime.HasValue,
             });
         }
         return list;
     }
 
-    private void RenderDay(List<JobExecution> executions)
+    private void RenderDay(List<JobExecution> executions, DateTime day)
     {
         DayCanvas.Children.Clear();
 
@@ -176,11 +199,12 @@ public partial class DayDetailControl : UserControl
             double w = Math.Max(3, ex.Duration.TotalMinutes);
             double y = HeaderH + ex.RowIndex * RowH + 4;
 
-            // Clamp to canvas width
             if (x >= CanvasW) continue;
             w = Math.Min(w, CanvasW - x);
 
-            var color = ex.Success ? "#2ECC71" : "#E74C3C";
+            var color = ex.IsRunning ? "#F39C12"
+                : ex.Success         ? "#2ECC71"
+                :                      "#E74C3C";
             var rect  = new Rectangle
             {
                 Width   = w,
@@ -193,6 +217,33 @@ public partial class DayDetailControl : UserControl
             ToolTip.SetTip(rect, BuildExecTooltip(ex));
             DayCanvas.Children.Add(rect);
         }
+
+        if (executions.Count == 0)
+        {
+            var msg = new TextBlock
+            {
+                Text                = "No job data found for this date",
+                Foreground          = new SolidColorBrush(Color.Parse("#6B7280")),
+                FontSize            = 13,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            Canvas.SetLeft(msg, CanvasW / 2.0 - 130);
+            Canvas.SetTop(msg, HeaderH + (totalRows * RowH) / 2.0 - 10);
+            DayCanvas.Children.Add(msg);
+        }
+
+        ScrollToCurrentTime(day);
+    }
+
+    private void ScrollToCurrentTime(DateTime day)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            double x = day.Date == DateTime.Today
+                ? Math.Max(0, DateTime.Now.Hour * 60 - 120)
+                : 0;
+            DayScroll.Offset = new Vector(x, 0);
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     private void AddRect(double x, double y, double w, double h, string color, double opacity = 1.0)
@@ -215,7 +266,10 @@ public partial class DayDetailControl : UserControl
         sb.AppendLine(ex.Row.JobLabel);
         sb.AppendLine(ex.Row.ServerName);
         sb.AppendLine($"Start:    {ex.StartTime:HH:mm:ss}");
-        sb.AppendLine($"End:      {ex.EndTime:HH:mm:ss}");
+        if (ex.IsRunning)
+            sb.AppendLine("End:      still running ⏳");
+        else
+            sb.AppendLine($"End:      {ex.EndTime:HH:mm:ss}");
         sb.AppendLine($"Duration: {FormatDuration(ex.Duration)}");
         if (!ex.Success) sb.AppendLine("⚠ FAILED");
         return sb.ToString().TrimEnd();

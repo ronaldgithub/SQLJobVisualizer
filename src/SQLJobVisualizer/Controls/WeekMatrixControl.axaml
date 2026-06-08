@@ -42,11 +42,14 @@
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="6,0,0,4">
-                        <TextBlock Text="Job / Server"
-                                   VerticalAlignment="Bottom"
-                                   Foreground="{DynamicResource ForegroundBrush}"
-                                   FontSize="11"
-                                   FontWeight="SemiBold"/>
+                        <Grid ColumnDefinitions="120,*" VerticalAlignment="Bottom" Margin="0,0,0,4">
+                            <TextBlock Grid.Column="0" Text="Job Type"
+                                       Foreground="{DynamicResource ForegroundBrush}"
+                                       FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="1" Text="Server"
+                                       Foreground="{DynamicResource ForegroundBrush}"
+                                       FontSize="11" FontWeight="SemiBold"/>
+                        </Grid>
                     </Border>
                     <StackPanel x:Name="LabelPanel" />
                 </StackPanel>

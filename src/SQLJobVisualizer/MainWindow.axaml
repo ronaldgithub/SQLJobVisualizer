@@ -4,8 +4,8 @@
         x:Class="SQLJobVisualizer.MainWindow"
         Title="SQL Job Visualizer"
         Background="{DynamicResource BackgroundBrush}"
-        Width="1400" Height="820"
-        MinWidth="900" MinHeight="600">
+        Width="1400" Height="900"
+        MinWidth="900" MinHeight="880">
 
     <TabControl Background="{DynamicResource BackgroundBrush}"
                 Padding="0">
