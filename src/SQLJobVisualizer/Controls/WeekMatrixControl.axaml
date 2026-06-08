@@ -36,23 +36,7 @@
                     Background="{DynamicResource BackgroundDarkBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,1,0">
-                <StackPanel>
-                    <!-- Spacer matching canvas header height -->
-                    <Border Height="42"
-                            BorderBrush="{DynamicResource BorderBrush}"
-                            BorderThickness="0,0,0,1"
-                            Padding="6,0,0,4">
-                        <Grid ColumnDefinitions="120,*" VerticalAlignment="Bottom" Margin="0,0,0,4">
-                            <TextBlock Grid.Column="0" Text="Job Type"
-                                       Foreground="{DynamicResource ForegroundBrush}"
-                                       FontSize="11" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="1" Text="Server"
-                                       Foreground="{DynamicResource ForegroundBrush}"
-                                       FontSize="11" FontWeight="SemiBold"/>
-                        </Grid>
-                    </Border>
-                    <StackPanel x:Name="LabelPanel" />
-                </StackPanel>
+                <Canvas x:Name="LabelCanvas" />
             </Border>
 
             <!-- Right: scrollable canvas -->

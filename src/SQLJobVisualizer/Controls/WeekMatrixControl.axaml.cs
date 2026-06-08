@@ -46,18 +46,42 @@ public partial class WeekMatrixControl : UserControl
     private void UpdateWeekLabel() =>
         WeekLabel.Text = $"{_weekStart:dd MMM} – {_weekStart.AddDays(6):dd MMM yyyy}";
 
+    private const int LabelW = 200;
+
     private void PopulateLabelPanel()
     {
-        LabelPanel.Children.Clear();
-        string? lastJob = null;
+        LabelCanvas.Children.Clear();
 
-        foreach (var row in ServerList.AllRows)
+        // Header row — same height as canvas HeaderH so rows align exactly
+        var headerBorder = new Border
         {
+            Width           = LabelW,
+            Height          = HeaderH,
+            Padding         = new Thickness(6, 0, 4, 0),
+            BorderBrush     = new SolidColorBrush(Color.Parse("#3A3D45")),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+        };
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(120)));
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
+        headerGrid.Children.Add(MakeHeaderTb("Job Type", 0));
+        headerGrid.Children.Add(MakeHeaderTb("Server",   1));
+        headerBorder.Child = headerGrid;
+        Canvas.SetLeft(headerBorder, 0);
+        Canvas.SetTop(headerBorder, 0);
+        LabelCanvas.Children.Add(headerBorder);
+
+        // Data rows — y matches HeaderH + rowIndex * CellH exactly
+        string? lastJob = null;
+        for (int i = 0; i < ServerList.AllRows.Count; i++)
+        {
+            var row = ServerList.AllRows[i];
             bool isGroupStart = row.JobLabel != lastJob;
             lastJob = row.JobLabel;
 
             var border = new Border
             {
+                Width           = LabelW,
                 Height          = CellH,
                 Padding         = new Thickness(6, 0, 4, 0),
                 BorderBrush     = new SolidColorBrush(Color.Parse("#2A2D35")),
@@ -92,8 +116,26 @@ public partial class WeekMatrixControl : UserControl
             grid.Children.Add(srvTb);
 
             border.Child = grid;
-            LabelPanel.Children.Add(border);
+            Canvas.SetLeft(border, 0);
+            Canvas.SetTop(border, HeaderH + i * CellH);
+            LabelCanvas.Children.Add(border);
         }
+
+        LabelCanvas.Height = HeaderH + ServerList.AllRows.Count * CellH;
+    }
+
+    private static TextBlock MakeHeaderTb(string text, int col)
+    {
+        var tb = new TextBlock
+        {
+            Text              = text,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize          = 11,
+            FontWeight        = FontWeight.SemiBold,
+            Foreground        = new SolidColorBrush(Color.Parse("#E4E6EB")),
+        };
+        Grid.SetColumn(tb, col);
+        return tb;
     }
 
     private async Task LoadAsync()
@@ -321,10 +363,16 @@ public partial class WeekMatrixControl : UserControl
 
     private void UpdateServerStatus(IReadOnlyList<string> failedServers)
     {
+        // failedServers entries are "serverName|errorMessage"
+        var errors = failedServers
+            .Select(s => s.Split('|', 2))
+            .Where(p => p.Length == 2)
+            .ToDictionary(p => p[0], p => p[1]);
+
         ServerStatusPanel.Children.Clear();
         foreach (var server in ServerList.ServerNames)
         {
-            bool failed = failedServers.Contains(server);
+            bool failed = errors.ContainsKey(server);
             var dot = new Border
             {
                 Width             = 8,
@@ -334,7 +382,8 @@ public partial class WeekMatrixControl : UserControl
                 Margin            = new Thickness(0, 0, 2, 0),
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            ToolTip.SetTip(dot, failed ? $"{server}: connection failed" : $"{server}: OK");
+            var tip = failed ? $"{server}: {errors[server]}" : $"{server}: OK";
+            ToolTip.SetTip(dot, tip);
 
             var lbl = new TextBlock
             {

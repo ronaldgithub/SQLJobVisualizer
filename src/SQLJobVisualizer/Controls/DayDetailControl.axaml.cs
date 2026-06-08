@@ -4,6 +4,7 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using SQLJobVisualizer.Models;
 using SQLJobVisualizer.Services;
 
@@ -17,6 +18,8 @@ public partial class DayDetailControl : UserControl
 
     private readonly CommandLogService _service = new();
     private CancellationTokenSource? _cts;
+    private readonly DispatcherTimer _clockTimer   = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
 
     public DayDetailControl()
     {
@@ -30,21 +33,62 @@ public partial class DayDetailControl : UserControl
         DatePicker.SelectedDate = DateTime.Today;
         DatePicker.SelectedDateChanged += (_, _) => _ = LoadAsync();
         RefreshButton.Click += (_, _) => _ = LoadAsync();
+
+        // Clock: update every second
+        _clockTimer.Tick += (_, _) => UpdateClock();
+        _clockTimer.Start();
+        UpdateClock();
+
+        // Auto-refresh: reload every 30 s when viewing today (shows running jobs)
+        _refreshTimer.Tick += (_, _) =>
+        {
+            var day = DatePicker.SelectedDate?.Date ?? DateTime.Today;
+            if (day == DateTime.Today) _ = LoadAsync();
+        };
+        _refreshTimer.Start();
+
         _ = LoadAsync();
     }
 
+    private void UpdateClock() =>
+        ClockText.Text = DateTime.Now.ToString("HH:mm:ss");
+
+    private const int LabelW = 200;
+
     private void PopulateLabelPanel()
     {
-        LabelPanel.Children.Clear();
-        string? lastJob = null;
+        LabelCanvas.Children.Clear();
 
-        foreach (var row in ServerList.AllRows)
+        // Header row — same height as canvas HeaderH so rows align exactly
+        var headerBorder = new Border
         {
+            Width           = LabelW,
+            Height          = HeaderH,
+            Padding         = new Thickness(6, 0, 4, 0),
+            BorderBrush     = new SolidColorBrush(Color.Parse("#3A3D45")),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+        };
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(120)));
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
+        headerGrid.Children.Add(MakeHeaderTb("Job Type", 0));
+        headerGrid.Children.Add(MakeHeaderTb("Server",   1));
+        headerBorder.Child = headerGrid;
+        Canvas.SetLeft(headerBorder, 0);
+        Canvas.SetTop(headerBorder, 0);
+        LabelCanvas.Children.Add(headerBorder);
+
+        // Data rows — y matches HeaderH + rowIndex * RowH exactly
+        string? lastJob = null;
+        for (int i = 0; i < ServerList.AllRows.Count; i++)
+        {
+            var row = ServerList.AllRows[i];
             bool isGroupStart = row.JobLabel != lastJob;
             lastJob = row.JobLabel;
 
             var border = new Border
             {
+                Width           = LabelW,
                 Height          = RowH,
                 Padding         = new Thickness(6, 0, 4, 0),
                 BorderBrush     = new SolidColorBrush(Color.Parse("#2A2D35")),
@@ -79,8 +123,26 @@ public partial class DayDetailControl : UserControl
             grid.Children.Add(srvTb);
 
             border.Child = grid;
-            LabelPanel.Children.Add(border);
+            Canvas.SetLeft(border, 0);
+            Canvas.SetTop(border, HeaderH + i * RowH);
+            LabelCanvas.Children.Add(border);
         }
+
+        LabelCanvas.Height = HeaderH + ServerList.AllRows.Count * RowH;
+    }
+
+    private static TextBlock MakeHeaderTb(string text, int col)
+    {
+        var tb = new TextBlock
+        {
+            Text              = text,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize          = 11,
+            FontWeight        = FontWeight.SemiBold,
+            Foreground        = new SolidColorBrush(Color.Parse("#E4E6EB")),
+        };
+        Grid.SetColumn(tb, col);
+        return tb;
     }
 
     private async Task LoadAsync()
@@ -95,10 +157,28 @@ public partial class DayDetailControl : UserControl
         try
         {
             var day = DatePicker.SelectedDate?.Date ?? DateTime.Today;
-            var (entries, failedServers) = await _service.LoadDayAsync(day, ct);
+
+            var completedTask = _service.LoadDayAsync(day, ct);
+            var runningTask   = day == DateTime.Today
+                ? _service.LoadRunningAsync(ct)
+                : Task.FromResult<(List<CommandLogEntry>, IReadOnlyList<string>)>(([], []));
+
+            await Task.WhenAll(completedTask, runningTask);
             if (ct.IsCancellationRequested) return;
 
-            var executions = BuildExecutions(entries, day);
+            var (completed, failedCompleted) = completedTask.Result;
+            var (running,   failedRunning)   = runningTask.Result;
+
+            // Merge: running jobs override any duplicate completed entry for same server+job
+            var runningKeys = new HashSet<string>(
+                running.Select(r => $"{r.ServerName}|{r.CommandType}"));
+            var merged = completed
+                .Where(c => !runningKeys.Contains($"{c.ServerName}|{c.CommandType}"))
+                .Concat(running)
+                .ToList();
+
+            var failedServers = failedCompleted.Concat(failedRunning).Distinct().ToList();
+            var executions = BuildExecutions(merged, day);
             RenderDay(executions, day);
             UpdateServerStatus(failedServers);
         }
@@ -275,10 +355,16 @@ public partial class DayDetailControl : UserControl
 
     private void UpdateServerStatus(IReadOnlyList<string> failedServers)
     {
+        // failedServers entries are "serverName|errorMessage"
+        var errors = failedServers
+            .Select(s => s.Split('|', 2))
+            .Where(p => p.Length == 2)
+            .ToDictionary(p => p[0], p => p[1]);
+
         ServerStatusPanel.Children.Clear();
         foreach (var server in ServerList.ServerNames)
         {
-            bool failed = failedServers.Contains(server);
+            bool failed = errors.ContainsKey(server);
             var dot = new Border
             {
                 Width             = 8,
@@ -288,7 +374,8 @@ public partial class DayDetailControl : UserControl
                 Margin            = new Thickness(0, 0, 2, 0),
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            ToolTip.SetTip(dot, failed ? $"{server}: connection failed" : $"{server}: OK");
+            var tip = failed ? $"{server}: {errors[server]}" : $"{server}: OK";
+            ToolTip.SetTip(dot, tip);
 
             var lbl = new TextBlock
             {
