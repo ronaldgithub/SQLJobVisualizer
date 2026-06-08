@@ -47,15 +47,21 @@ IntegrityCheck - ALL   sql5
 
 ## Data Source
 
-Queries `dbo.CommandLog` (Ola Hallengren standard schema):
+Queries `msdb.dbo.sysjobhistory` (SQL Server Agent Job History) joined to `msdb.dbo.sysjobs`. This is universally available on any SQL Server running Agent jobs, with no additional tools required.
 
-| Column | Used for |
+| sysjobhistory column | Notes |
 |---|---|
-| `CommandType` | Job type: `DatabaseBackup`, `IndexOptimize`, `DatabaseIntegrityCheck` |
-| `Command` | Parsed by `JobParser` regex to extract `@BackupType='FULL\|DIFF\|LOG'` |
-| `StartTime` | Position on the time axis |
-| `EndTime` | Duration; `NULL` = still running (skipped in day view) |
-| `ErrorNumber` | `NULL` = success (green), any value = failed (red) |
+| `j.name` (job name) | Matched directly to job label in `JobParser` |
+| `h.run_date` | `int` `YYYYMMDD`; passed as `@FromDate`/`@ToDate` parameter |
+| `h.run_time` | `int` `HHMMSS`; converted to `datetime` via `DATEADD` in SQL |
+| `h.run_duration` | `int` `HHMMSS`; added to start time → `EndTime` |
+| `h.run_status` | `1` = success → `ErrorNumber NULL`; other = failed → `ErrorNumber = run_status` |
+| `h.step_id = 0` | Job-level outcome row only (not individual step rows) |
+
+Agent job names matched (`sysjobs.name`):
+`DatabaseBackup - FULL`, `DatabaseBackup - DIFF`, `DatabaseBackup - LOG`, `IndexOptimize`, `DatabaseIntegrityCheck`
+
+`JobParser` also handles the legacy `dbo.CommandLog` `CommandType` values as a fallback.
 
 ## Week View Canvas Geometry
 

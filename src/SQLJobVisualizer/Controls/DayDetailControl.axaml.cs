@@ -60,12 +60,10 @@ public partial class DayDetailControl : UserControl
 
             var jobTb = new TextBlock
             {
-                Text              = row.ShortJobLabel,
+                Text              = isGroupStart ? row.ShortJobLabel : "",
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize          = 10,
-                Foreground        = new SolidColorBrush(isGroupStart
-                    ? Color.Parse("#D0D2D8")
-                    : Color.Parse("#8A8FA0")),
+                Foreground        = new SolidColorBrush(Color.Parse("#D0D2D8")),
             };
             var srvTb = new TextBlock
             {

@@ -10,9 +10,14 @@ public static partial class JobParser
     public static string? ParseJobLabel(string commandType, string command) =>
         commandType switch
         {
-            "DatabaseBackup"          => ParseBackupLabel(command),
+            // SQL Agent job names (msdb.dbo.sysjobhistory source)
+            "DatabaseBackup - FULL"   => "DatabaseBackup - FULL",
+            "DatabaseBackup - DIFF"   => "DatabaseBackup - DIFF",
+            "DatabaseBackup - LOG"    => "DatabaseBackup - LOG",
             "IndexOptimize"           => "IndexOptimize - ALL",
             "DatabaseIntegrityCheck"  => "IntegrityCheck - ALL",
+            // Ola Hallengren CommandLog source (fallback)
+            "DatabaseBackup"          => ParseBackupLabel(command),
             _                         => null
         };
 
