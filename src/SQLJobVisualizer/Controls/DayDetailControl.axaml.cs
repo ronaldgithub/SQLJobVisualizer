@@ -4,6 +4,7 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 using SQLJobVisualizer.Models;
 using SQLJobVisualizer.Services;
@@ -20,6 +21,7 @@ public partial class DayDetailControl : UserControl
     private CancellationTokenSource? _cts;
     private readonly DispatcherTimer _clockTimer   = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private Rectangle? _timeLine;
 
     public DayDetailControl()
     {
@@ -48,8 +50,12 @@ public partial class DayDetailControl : UserControl
         _ = LoadAsync();
     }
 
-    private void UpdateClock() =>
+    private void UpdateClock()
+    {
         ClockText.Text = DateTime.Now.ToString("HH:mm:ss");
+        if (_timeLine is not null)
+            Canvas.SetLeft(_timeLine, DateTime.Now.TimeOfDay.TotalMinutes);
+    }
 
     private const int LabelW = 200;
 
@@ -156,16 +162,18 @@ public partial class DayDetailControl : UserControl
         {
             var day = DatePicker.SelectedDate?.Date ?? DateTime.Today;
 
-            var completedTask = _service.LoadDayAsync(day, ct);
-            var runningTask   = day == DateTime.Today
+            var completedTask  = _service.LoadDayAsync(day, ct);
+            var runningTask    = day == DateTime.Today
                 ? _service.LoadRunningAsync(ct)
                 : Task.FromResult<(List<CommandLogEntry>, IReadOnlyList<string>)>(([], []));
+            var scheduledTask  = _service.LoadScheduledAsync(day, ct);
 
-            await Task.WhenAll(completedTask, runningTask);
+            await Task.WhenAll(completedTask, runningTask, scheduledTask);
             if (ct.IsCancellationRequested) return;
 
             var (completed, failedCompleted) = completedTask.Result;
             var (running,   failedRunning)   = runningTask.Result;
+            var scheduled                    = scheduledTask.Result;
 
             // Suppress only the specific completed row that matches the running job's start time
             // (to the minute), so earlier runs of the same job stay visible.
@@ -177,8 +185,16 @@ public partial class DayDetailControl : UserControl
                 .ToList();
 
             var failedServers = failedCompleted.Concat(failedRunning).Distinct().ToList();
-            var executions = BuildExecutions(merged, day);
-            RenderDay(executions, day);
+            var executions    = BuildExecutions(merged, day);
+
+            // Average historical duration per row — used to size scheduled bars
+            var avgDurations = executions
+                .Where(e => !e.IsRunning)
+                .GroupBy(e => e.RowIndex)
+                .ToDictionary(g => g.Key,
+                    g => TimeSpan.FromSeconds(g.Average(e => e.Duration.TotalSeconds)));
+
+            RenderDay(executions, scheduled, avgDurations, day);
             UpdateServerStatus(failedServers);
         }
         catch (OperationCanceledException) { }
@@ -220,7 +236,8 @@ public partial class DayDetailControl : UserControl
         return list;
     }
 
-    private void RenderDay(List<JobExecution> executions, DateTime day)
+    private void RenderDay(List<JobExecution> executions, List<ScheduledRun> scheduled,
+                           Dictionary<int, TimeSpan> avgDurations, DateTime day)
     {
         DayCanvas.Children.Clear();
 
@@ -298,6 +315,33 @@ public partial class DayDetailControl : UserControl
             DayCanvas.Children.Add(rect);
         }
 
+        // Scheduled (next-run) hollow bars
+        foreach (var sr in scheduled)
+        {
+            var estDuration = avgDurations.TryGetValue(sr.RowIndex, out var avg)
+                ? avg : TimeSpan.FromMinutes(30);
+            double x = sr.ScheduledTime.TimeOfDay.TotalMinutes;
+            double w = Math.Max(4, estDuration.TotalMinutes);
+            double y = HeaderH + sr.RowIndex * RowH + 4;
+
+            if (x >= CanvasW) continue;
+            w = Math.Min(w, CanvasW - x);
+
+            var hollow = new Rectangle
+            {
+                Width           = w,
+                Height          = RowH - 8,
+                Fill            = Brushes.Transparent,
+                Stroke          = new SolidColorBrush(Color.Parse("#E74C3C")),
+                StrokeThickness = 1.5,
+                Opacity         = 0.6,
+            };
+            Canvas.SetLeft(hollow, x);
+            Canvas.SetTop(hollow, y);
+            ToolTip.SetTip(hollow, $"{sr.JobLabel}\n{sr.ServerName}\nScheduled: {sr.ScheduledTime:HH:mm}");
+            DayCanvas.Children.Add(hollow);
+        }
+
         if (executions.Count == 0)
         {
             var msg = new TextBlock
@@ -310,6 +354,22 @@ public partial class DayDetailControl : UserControl
             Canvas.SetLeft(msg, CanvasW / 2.0 - 130);
             Canvas.SetTop(msg, HeaderH + (totalRows * RowH) / 2.0 - 10);
             DayCanvas.Children.Add(msg);
+        }
+
+        // Current-time marker — only when viewing today; moves every second via UpdateClock
+        _timeLine = null;
+        if (day == DateTime.Today)
+        {
+            _timeLine = new Rectangle
+            {
+                Width   = 2,
+                Height  = canvasH,
+                Fill    = new SolidColorBrush(Color.Parse("#FF4444")),
+                Opacity = 0.85,
+            };
+            Canvas.SetLeft(_timeLine, DateTime.Now.TimeOfDay.TotalMinutes);
+            Canvas.SetTop(_timeLine, 0);
+            DayCanvas.Children.Add(_timeLine);
         }
 
         ScrollToCurrentTime(day);

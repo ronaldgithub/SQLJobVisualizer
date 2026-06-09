@@ -20,6 +20,68 @@ public sealed class CommandLogService
             int.Parse(day.Date.ToString("yyyyMMdd")),
             ct);
 
+    public async Task<List<ScheduledRun>> LoadScheduledAsync(DateTime day, CancellationToken ct = default)
+    {
+        var tasks   = ServerList.ServerNames
+            .Select(s => QueryScheduledAsync(s, day, ct))
+            .ToArray();
+        var results = await Task.WhenAll(tasks);
+        return results.SelectMany(r => r).ToList();
+    }
+
+    private static async Task<List<ScheduledRun>> QueryScheduledAsync(
+        string serverName, DateTime day, CancellationToken ct)
+    {
+        var list = new List<ScheduledRun>();
+        try
+        {
+            await using var conn = new SqlConnection(ServerList.GetConnectionString(serverName));
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 10;
+            cmd.Parameters.AddWithValue("@Day", day.Date);
+            cmd.CommandText = BuildScheduledQuery(cmd);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var jobName       = reader.GetString(0);
+                var scheduledTime = reader.GetDateTime(1);
+                var jobLabel      = JobParser.ParseJobLabel(jobName, "");
+                if (jobLabel is null) continue;
+                int rowIdx = ServerList.GetRowIndex(serverName, jobLabel);
+                if (rowIdx < 0) continue;
+                list.Add(new ScheduledRun
+                {
+                    ServerName    = serverName,
+                    JobLabel      = jobLabel,
+                    RowIndex      = rowIdx,
+                    ScheduledTime = scheduledTime,
+                });
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await Console.Error.WriteLineAsync($"[scheduled:{serverName}] {ex.Message}");
+        }
+        return list;
+    }
+
+    private static string BuildScheduledQuery(SqlCommand cmd)
+    {
+        var filter = BuildJobFilter(cmd);
+        return $"""
+            SELECT j.name,
+                   ja.next_scheduled_run_date
+            FROM msdb.dbo.sysjobactivity ja
+                INNER JOIN msdb.dbo.sysjobs j ON ja.job_id = j.job_id
+            WHERE ja.session_id = (SELECT MAX(session_id) FROM msdb.dbo.syssessions)
+              AND ja.next_scheduled_run_date IS NOT NULL
+              AND CAST(ja.next_scheduled_run_date AS date) = @Day
+              AND {filter}
+            ORDER BY ja.next_scheduled_run_date;
+            """;
+    }
+
     public async Task<(List<CommandLogEntry> Entries, IReadOnlyList<string> FailedServers)>
         LoadRunningAsync(CancellationToken ct = default)
     {
@@ -119,6 +181,7 @@ public sealed class CommandLogService
                OR r.command LIKE N'RESTORE VERIFYONLY%'
                OR r.command LIKE N'RESTORE HEADERONLY%'
                OR r.command = N'ALTER INDEX'
+               OR r.command = N'REBUILD INDEX'
                OR r.command = N'UPDATE STATISTICS')
         ORDER BY r.session_id;
         """;

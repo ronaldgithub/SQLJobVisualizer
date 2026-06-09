@@ -3,6 +3,7 @@
         xmlns:controls="clr-namespace:SQLJobVisualizer.Controls"
         x:Class="SQLJobVisualizer.MainWindow"
         Title="SQL Job Visualizer"
+        Icon="avares://SQLJobVisualizer/app.ico"
         Background="{DynamicResource BackgroundBrush}"
         Width="1400" Height="900"
         MinWidth="900" MinHeight="880">
