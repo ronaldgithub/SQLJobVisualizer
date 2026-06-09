@@ -2,6 +2,15 @@
 
 A dark-mode desktop application for visualizing SQL Server Agent maintenance job history across multiple servers. Designed to make it immediately obvious whether jobs ran successfully, how long they took, and whether jobs on different servers overlap.
 
+## TODO
+
+- [ ] **Failed job error message** — fetch the error text from `sysjobhistory` step rows (`step_id > 0`) and show it in the tooltip for failed bars
+- [ ] **Estimated time to completion** — for running jobs, calculate `elapsed / percent_complete × (100 - percent_complete)` and show `ETA: ~X min` in the tooltip
+- [ ] **Duration variance highlighting** — compare current run duration against historical average; colour a running bar amber if it exceeds 1.5× the average
+- [ ] **Missed job indicator** — show a faint grey cell when a job ran yesterday but not today (past its expected window)
+- [ ] **Database list in tooltip** — for backup jobs, parse the database name from `sysjobhistory` step messages and list them in the completed-job tooltip
+- [ ] **Backup coverage tab** — third tab with one row per database: last FULL backup age, last LOG backup age, highlighted red when older than a configurable threshold
+
 ## Features
 
 - **Week Overview** — 7-day × 24-hour grid showing every maintenance job execution per server. Green = success, red = failed, orange = currently running. Navigate with Prev/Next week buttons; auto-scrolls to the current day.
