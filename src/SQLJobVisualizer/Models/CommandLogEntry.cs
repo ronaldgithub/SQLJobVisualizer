@@ -8,4 +8,5 @@ public sealed class CommandLogEntry
     public DateTime  StartTime   { get; init; }
     public DateTime? EndTime     { get; init; }
     public int?      ErrorNumber { get; init; }
+    public List<SessionProgress> Progress { get; set; } = [];
 }

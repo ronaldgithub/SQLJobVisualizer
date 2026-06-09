@@ -9,6 +9,11 @@
 
     <TabControl Background="{DynamicResource BackgroundBrush}"
                 Padding="0">
+        <TabControl.Styles>
+            <Style Selector="TabControl > TabStrip">
+                <Setter Property="HorizontalAlignment" Value="Left"/>
+            </Style>
+        </TabControl.Styles>
         <TabItem Header="Week Overview">
             <controls:WeekMatrixControl />
         </TabItem>

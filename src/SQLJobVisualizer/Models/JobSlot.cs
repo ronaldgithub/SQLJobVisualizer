@@ -7,5 +7,6 @@ public sealed class JobSlot
     public int      HourOffset       { get; init; }
     public bool     Success          { get; init; }
     public DateTime  StartTime       { get; init; }
-    public DateTime? EndTime         { get; init; }
+    public DateTime?             EndTime  { get; init; }
+    public List<SessionProgress> Progress { get; init; } = [];
 }

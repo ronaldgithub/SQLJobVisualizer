@@ -4,26 +4,21 @@ namespace SQLJobVisualizer.Services;
 
 public static class ServerList
 {
-    public static readonly string[] ServerNames =
-        ["sql1", "sql2", "sql3", "sql4", "sql5"];
+    private static readonly AppConfig _config = ConfigLoader.Load();
 
-    public static readonly string[] JobLabels =
-    [
-        "DatabaseBackup - FULL",
-        "DatabaseBackup - DIFF",
-        "DatabaseBackup - LOG",
-        "IndexOptimize - ALL",
-        "IntegrityCheck - ALL",
-    ];
+    public static string[]    ServerNames { get; } = _config.Servers;
+    public static JobConfig[] Jobs        { get; } = _config.Jobs;
+    public static string[]    JobLabels   { get; } = [.. _config.Jobs.Select(j => j.Label)];
 
     public static readonly IReadOnlyList<JobRow> AllRows =
-        (from job    in JobLabels
-         from server in ServerNames
-         select new JobRow(server, job)).ToList();
+        (from job    in _config.Jobs
+         from server in _config.Servers
+         let  sl     = string.IsNullOrEmpty(job.ShortLabel) ? job.Label : job.ShortLabel
+         select new JobRow(server, job.Label, sl)).ToList();
 
     public static int GetRowIndex(string serverName, string jobLabel)
     {
-        int jobIdx = Array.IndexOf(JobLabels, jobLabel);
+        int jobIdx = Array.IndexOf(JobLabels,   jobLabel);
         int srvIdx = Array.IndexOf(ServerNames, serverName);
         if (jobIdx < 0 || srvIdx < 0) return -1;
         return jobIdx * ServerNames.Length + srvIdx;

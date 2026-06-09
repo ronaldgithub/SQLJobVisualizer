@@ -8,5 +8,6 @@ public sealed class JobExecution
     public DateTime EndTime      { get; init; }
     public bool     Success      { get; init; }
     public bool     IsRunning    { get; init; }
-    public TimeSpan Duration     => EndTime - StartTime;
+    public TimeSpan              Duration => EndTime - StartTime;
+    public List<SessionProgress> Progress { get; init; } = [];
 }

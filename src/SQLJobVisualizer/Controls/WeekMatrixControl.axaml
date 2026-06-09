@@ -36,7 +36,7 @@
                     Background="{DynamicResource BackgroundDarkBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,1,0">
-                <Canvas x:Name="LabelCanvas" />
+                <Canvas x:Name="LabelCanvas" VerticalAlignment="Top" />
             </Border>
 
             <!-- Right: scrollable canvas -->
@@ -44,7 +44,7 @@
                           x:Name="MatrixScroll"
                           HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Hidden">
-                <Canvas x:Name="MatrixCanvas" />
+                <Canvas x:Name="MatrixCanvas" VerticalAlignment="Top" />
             </ScrollViewer>
 
         </Grid>

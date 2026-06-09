@@ -25,28 +25,26 @@ public partial class DayDetailControl : UserControl
     {
         InitializeComponent();
         PopulateLabelPanel();
-    }
 
-    protected override void OnLoaded(RoutedEventArgs e)
-    {
-        base.OnLoaded(e);
-        DatePicker.SelectedDate = DateTime.Today;
+        DatePicker.SelectedDate        =  DateTime.Today;
         DatePicker.SelectedDateChanged += (_, _) => _ = LoadAsync();
-        RefreshButton.Click += (_, _) => _ = LoadAsync();
+        RefreshButton.Click            += (_, _) => _ = LoadAsync();
 
-        // Clock: update every second
         _clockTimer.Tick += (_, _) => UpdateClock();
         _clockTimer.Start();
         UpdateClock();
 
-        // Auto-refresh: reload every 30 s when viewing today (shows running jobs)
         _refreshTimer.Tick += (_, _) =>
         {
             var day = DatePicker.SelectedDate?.Date ?? DateTime.Today;
             if (day == DateTime.Today) _ = LoadAsync();
         };
         _refreshTimer.Start();
+    }
 
+    protected override void OnLoaded(RoutedEventArgs e)
+    {
+        base.OnLoaded(e);
         _ = LoadAsync();
     }
 
@@ -169,11 +167,12 @@ public partial class DayDetailControl : UserControl
             var (completed, failedCompleted) = completedTask.Result;
             var (running,   failedRunning)   = runningTask.Result;
 
-            // Merge: running jobs override any duplicate completed entry for same server+job
+            // Suppress only the specific completed row that matches the running job's start time
+            // (to the minute), so earlier runs of the same job stay visible.
             var runningKeys = new HashSet<string>(
-                running.Select(r => $"{r.ServerName}|{r.CommandType}"));
+                running.Select(r => $"{r.ServerName}|{r.CommandType}|{r.StartTime:yyyyMMddHHmm}"));
             var merged = completed
-                .Where(c => !runningKeys.Contains($"{c.ServerName}|{c.CommandType}"))
+                .Where(c => !runningKeys.Contains($"{c.ServerName}|{c.CommandType}|{c.StartTime:yyyyMMddHHmm}"))
                 .Concat(running)
                 .ToList();
 
@@ -215,6 +214,7 @@ public partial class DayDetailControl : UserControl
                 EndTime   = endTime,
                 Success   = !entry.ErrorNumber.HasValue,
                 IsRunning = !entry.EndTime.HasValue,
+                Progress  = entry.Progress,
             });
         }
         return list;
@@ -224,8 +224,10 @@ public partial class DayDetailControl : UserControl
     {
         DayCanvas.Children.Clear();
 
-        const int totalRows = 25;
-        double canvasH = HeaderH + totalRows * RowH; // 30 + 700 = 730
+        int totalRows = ServerList.AllRows.Count;
+        int jobCount  = ServerList.JobLabels.Length;
+        int srvCount  = ServerList.ServerNames.Length;
+        double canvasH = HeaderH + totalRows * RowH;
 
         DayCanvas.Width  = CanvasW;
         DayCanvas.Height = canvasH;
@@ -238,8 +240,8 @@ public partial class DayDetailControl : UserControl
 
         // Alternating row group backgrounds
         string[] groupBg = ["#1A1D23", "#1D2028"];
-        for (int g = 0; g < 5; g++)
-            AddRect(0, HeaderH + g * 5 * RowH, CanvasW, 5 * RowH, groupBg[g % 2]);
+        for (int g = 0; g < jobCount; g++)
+            AddRect(0, HeaderH + g * srvCount * RowH, CanvasW, srvCount * RowH, groupBg[g % 2]);
 
         // Hour header labels and vertical grid lines
         for (int h = 0; h <= 24; h++)
@@ -267,8 +269,8 @@ public partial class DayDetailControl : UserControl
         AddRect(0, HeaderH - 1, CanvasW, 1, "#3A3D45");
 
         // Job-group separators
-        for (int g = 1; g < 5; g++)
-            AddRect(0, HeaderH + g * 5 * RowH, CanvasW, 2, "#3A3D45");
+        for (int g = 1; g < jobCount; g++)
+            AddRect(0, HeaderH + g * srvCount * RowH, CanvasW, 2, "#3A3D45");
 
         // Job execution bars
         foreach (var ex in executions)
@@ -350,6 +352,12 @@ public partial class DayDetailControl : UserControl
             sb.AppendLine($"End:      {ex.EndTime:HH:mm:ss}");
         sb.AppendLine($"Duration: {FormatDuration(ex.Duration)}");
         if (!ex.Success) sb.AppendLine("⚠ FAILED");
+        if (ex.IsRunning && ex.Progress.Count > 0)
+        {
+            sb.AppendLine("──────────────────────────");
+            foreach (var p in ex.Progress)
+                sb.AppendLine($"spid {p.SessionId}  {p.DatabaseName}  {p.Command}  {p.PercentComplete:0.0}%");
+        }
         return sb.ToString().TrimEnd();
     }
 

@@ -2,42 +2,23 @@ using System.Text.RegularExpressions;
 
 namespace SQLJobVisualizer.Services;
 
-public static partial class JobParser
+public static class JobParser
 {
-    [GeneratedRegex(@"@BackupType\s*=\s*'(\w+)'", RegexOptions.IgnoreCase)]
-    private static partial Regex BackupTypeRegex();
-
-    // Matches both exact Ola Hallengren job names ("DatabaseIntegrityCheck") and
-    // scoped variants ("DatabaseIntegrityCheck - ALL_DATABASES", etc.) used on some servers.
-    public static string? ParseJobLabel(string commandType, string command)
+    public static string? ParseJobLabel(string jobName, string _command)
     {
-        var ct = commandType;
-
-        if (ct.StartsWith("DatabaseBackup", StringComparison.OrdinalIgnoreCase))
+        foreach (var job in ServerList.Jobs)
         {
-            if (ct.Contains("FULL", StringComparison.OrdinalIgnoreCase)) return "DatabaseBackup - FULL";
-            if (ct.Contains("DIFF", StringComparison.OrdinalIgnoreCase)) return "DatabaseBackup - DIFF";
-            if (ct.Contains("LOG",  StringComparison.OrdinalIgnoreCase)) return "DatabaseBackup - LOG";
-            // CommandLog fallback: parse @BackupType from the Command column
-            return ParseBackupLabel(command);
+            if (MatchesLike(jobName, job.SqlPattern))
+                return job.Label;
         }
-
-        if (ct.StartsWith("IndexOptimize",          StringComparison.OrdinalIgnoreCase)) return "IndexOptimize - ALL";
-        if (ct.StartsWith("DatabaseIntegrityCheck", StringComparison.OrdinalIgnoreCase)) return "IntegrityCheck - ALL";
-
         return null;
     }
 
-    private static string? ParseBackupLabel(string command)
+    private static bool MatchesLike(string input, string pattern)
     {
-        var m = BackupTypeRegex().Match(command);
-        if (!m.Success) return null;
-        return m.Groups[1].Value.ToUpperInvariant() switch
-        {
-            "FULL" => "DatabaseBackup - FULL",
-            "DIFF" => "DatabaseBackup - DIFF",
-            "LOG"  => "DatabaseBackup - LOG",
-            _      => null
-        };
+        var regexPattern = "^" + Regex.Escape(pattern)
+            .Replace("%", ".*")
+            .Replace("_", ".") + "$";
+        return Regex.IsMatch(input, regexPattern, RegexOptions.IgnoreCase);
     }
 }

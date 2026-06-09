@@ -25,14 +25,14 @@ public partial class WeekMatrixControl : UserControl
         _weekStart = GetWeekMonday(DateTime.Today);
         UpdateWeekLabel();
         PopulateLabelPanel();
+        PrevWeekButton.Click += (_, _) => NavigateWeek(-1);
+        NextWeekButton.Click += (_, _) => NavigateWeek(1);
+        RefreshButton.Click  += (_, _) => _ = LoadAsync();
     }
 
     protected override void OnLoaded(RoutedEventArgs e)
     {
         base.OnLoaded(e);
-        PrevWeekButton.Click += (_, _) => NavigateWeek(-1);
-        NextWeekButton.Click += (_, _) => NavigateWeek(1);
-        RefreshButton.Click  += (_, _) => _ = LoadAsync();
         _ = LoadAsync();
     }
 
@@ -142,18 +142,19 @@ public partial class WeekMatrixControl : UserControl
     {
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
-        var ct = _cts.Token;
+        var ct        = _cts.Token;
+        var weekStart = _weekStart;   // capture before any await
 
         RefreshButton.IsEnabled = false;
         RefreshButton.Content   = "Loading…";
 
         try
         {
-            var (entries, failedServers) = await _service.LoadWeekAsync(_weekStart, ct);
+            var (entries, failedServers) = await _service.LoadWeekAsync(weekStart, ct);
             if (ct.IsCancellationRequested) return;
 
-            var slots = BuildSlots(entries, _weekStart);
-            RenderMatrix(slots, _weekStart);
+            var slots = BuildSlots(entries, weekStart);
+            RenderMatrix(slots, weekStart);
             UpdateServerStatus(failedServers);
         }
         catch (OperationCanceledException) { }
@@ -197,6 +198,7 @@ public partial class WeekMatrixControl : UserControl
                     Success    = success,
                     StartTime  = entry.StartTime,
                     EndTime    = entry.EndTime,
+                    Progress   = entry.Progress,
                 });
             }
         }
@@ -208,9 +210,11 @@ public partial class WeekMatrixControl : UserControl
         MatrixCanvas.Children.Clear();
 
         const int totalCols = 168;
-        const int totalRows = 25;
-        double canvasW = totalCols * CellW;   // 2016
-        double canvasH = HeaderH + totalRows * CellH; // 642
+        int totalRows = ServerList.AllRows.Count;
+        int jobCount  = ServerList.JobLabels.Length;
+        int srvCount  = ServerList.ServerNames.Length;
+        double canvasW = totalCols * CellW;
+        double canvasH = HeaderH + totalRows * CellH;
 
         MatrixCanvas.Width  = canvasW;
         MatrixCanvas.Height = canvasH;
@@ -223,8 +227,8 @@ public partial class WeekMatrixControl : UserControl
 
         // Alternating group backgrounds
         string[] groupBg = ["#1A1D23", "#1D2028"];
-        for (int g = 0; g < 5; g++)
-            AddRect(0, HeaderH + g * 5 * CellH, canvasW, 5 * CellH, groupBg[g % 2]);
+        for (int g = 0; g < jobCount; g++)
+            AddRect(0, HeaderH + g * srvCount * CellH, canvasW, srvCount * CellH, groupBg[g % 2]);
 
         // Day column headers and separators
         string[] dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -269,9 +273,9 @@ public partial class WeekMatrixControl : UserControl
         // Header bottom border
         AddRect(0, HeaderH - 1, canvasW, 1, "#3A3D45");
 
-        // Job-group separators (every 5 rows)
-        for (int g = 1; g < 5; g++)
-            AddRect(0, HeaderH + g * 5 * CellH, canvasW, 2, "#3A3D45");
+        // Job-group separators
+        for (int g = 1; g < jobCount; g++)
+            AddRect(0, HeaderH + g * srvCount * CellH, canvasW, 2, "#3A3D45");
 
         // Faint 6-hour grid lines inside days
         for (int h = 6; h < totalCols; h += 6)
@@ -358,6 +362,12 @@ public partial class WeekMatrixControl : UserControl
             sb.AppendLine("End:      still running");
         }
         if (!slot.Success) sb.AppendLine("⚠ FAILED");
+        if (!slot.EndTime.HasValue && slot.Progress.Count > 0)
+        {
+            sb.AppendLine("──────────────────────────");
+            foreach (var p in slot.Progress)
+                sb.AppendLine($"spid {p.SessionId}  {p.DatabaseName}  {p.Command}  {p.PercentComplete:0.0}%");
+        }
         return sb.ToString().TrimEnd();
     }
 
