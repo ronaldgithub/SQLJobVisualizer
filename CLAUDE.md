@@ -20,6 +20,7 @@ src/SQLJobVisualizer/
     JobSlot.cs          -- One hour-cell in the week matrix
     JobExecution.cs     -- One bar in the day view
     SessionProgress.cs  -- spid/database/command/percent from sys.dm_exec_requests
+    ScheduledRun.cs     -- Next scheduled run from sysjobactivity; carries ScheduleId for drag-to-reschedule
   Services/           -- SQL access and parsing logic
     ConfigLoader.cs     -- Reads/writes config.json; creates defaults on first run
     ServerList.cs       -- Loads from ConfigLoader; exposes ServerNames, Jobs, AllRows
@@ -123,6 +124,21 @@ Requires `VIEW SERVER STATE` on the monitored servers. The progress query uses a
 
 - `CanvasW = 1440 px` (1 px per minute), `HeaderH = 30 px`, `RowH = 28 px`
 - Bar x-position = `StartTime.TimeOfDay.TotalMinutes`, minimum bar width = 3 px
+
+## Drag-to-Reschedule (Day View)
+
+Scheduled bars (hollow red outlines, sourced from `sysjobactivity.next_scheduled_run_date`) are draggable when a `schedule_id` was resolved from `msdb.dbo.sysschedules`.
+
+**Schedule ID resolution** — `BuildScheduledQuery` uses a correlated subquery on `sysjobschedules` + `sysschedules`, picking the enabled schedule whose `active_start_time` is closest (by absolute difference) to the job's next scheduled run time. This correctly handles jobs with multiple schedules.
+
+**Drag flow** — pointer events on each hollow `Rectangle`:
+1. `PointerPressed` → capture pointer, turn bar yellow (`#F1C40F`), record `_dragOriginalX`
+2. `PointerMoved` → move bar horizontally, clamped to canvas bounds
+3. `PointerReleased` → snap to nearest 5-minute mark, show `ShowRescheduleConfirmAsync` dialog; on confirm call `RescheduleAsync`, on cancel restore bar
+
+**Rescheduling** — `CommandLogService.RescheduleAsync` calls `msdb.dbo.sp_update_schedule` as a stored procedure with `@schedule_id` and `@active_start_time` (integer `HHMMSS`). Requires `SQLAgentOperatorRole` or `sysadmin` on the target server.
+
+**Permission note** — if the login lacks `sp_update_schedule` rights, the drag will show the confirmation dialog but the reschedule call will fail silently (view reloads to show the unchanged schedule).
 
 ## Avalonia Pitfalls
 

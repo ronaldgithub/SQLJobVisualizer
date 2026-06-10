@@ -15,8 +15,9 @@ A dark-mode desktop application for visualizing SQL Server Agent maintenance job
 
 - **Week Overview** — 7-day × 24-hour grid showing every maintenance job execution per server. Green = success, red = failed, orange = currently running. Navigate with Prev/Next week buttons; auto-scrolls to the current day.
 - **Day Detail** — Pick any date with a calendar picker; see proportional job bars for the full 24-hour period with exact start/end times on hover. Auto-refreshes every 30 seconds when viewing today.
+- **Drag-to-reschedule** — Scheduled jobs appear as hollow outlined bars. Drag one left or right to a new start time (snaps to 5-minute marks), confirm in the dialog, and the SQL Agent schedule is updated immediately via `msdb.dbo.sp_update_schedule` — no need to open SSMS. Saves significant DBA time when redistributing load across the day.
 - **Multiple servers in parallel** — Queries all configured servers simultaneously. If one server is unreachable the others still load; a colour-coded dot in the toolbar shows each server's status.
-- **Hover tooltips** — Every cell and bar shows server name, job type, start time, end time, and duration. For a **running job** the tooltip also shows live progress: spid, database name, command, and percent complete.
+- **Hover tooltips** — Every cell and bar shows server name, job type, start time, end time, and duration. For a **running job** the tooltip also shows live progress: spid, database name, command, and percent complete. Hovering a **row label** shows the actual T-SQL from the SQL Agent job step.
 - **Config file** — Servers and job definitions are read from `config.json` next to the exe. No recompile needed to add servers or jobs.
 
 ## Jobs Visualized
@@ -41,6 +42,7 @@ Any SQL Server Agent job can be added by editing `config.json`.
 - Login used by the app requires:
   - `db_datareader` on `msdb` (for job history and activity)
   - `VIEW SERVER STATE` (for live progress via `sys.dm_exec_requests`)
+  - `SQLAgentOperatorRole` on `msdb` (or `sysadmin`) to reschedule jobs via `sp_update_schedule`
 
 ## Getting Started
 
