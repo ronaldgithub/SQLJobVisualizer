@@ -20,6 +20,21 @@ public sealed class CommandLogService
             int.Parse(day.Date.ToString("yyyyMMdd")),
             ct);
 
+    public async Task RescheduleAsync(string serverName, int scheduleId, TimeSpan newTime,
+                                      CancellationToken ct = default)
+    {
+        int timeVal = newTime.Hours * 10000 + newTime.Minutes * 100;
+        await using var conn = new SqlConnection(ServerList.GetConnectionString(serverName));
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText    = "msdb.dbo.sp_update_schedule";
+        cmd.CommandType    = System.Data.CommandType.StoredProcedure;
+        cmd.CommandTimeout = 15;
+        cmd.Parameters.AddWithValue("@schedule_id",       scheduleId);
+        cmd.Parameters.AddWithValue("@active_start_time", timeVal);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<List<ScheduledRun>> LoadScheduledAsync(DateTime day, CancellationToken ct = default)
     {
         var tasks   = ServerList.ServerNames
@@ -46,6 +61,7 @@ public sealed class CommandLogService
             {
                 var jobName       = reader.GetString(0);
                 var scheduledTime = reader.GetDateTime(1);
+                var scheduleId    = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
                 var jobLabel      = JobParser.ParseJobLabel(jobName, "");
                 if (jobLabel is null) continue;
                 int rowIdx = ServerList.GetRowIndex(serverName, jobLabel);
@@ -56,6 +72,7 @@ public sealed class CommandLogService
                     JobLabel      = jobLabel,
                     RowIndex      = rowIdx,
                     ScheduledTime = scheduledTime,
+                    ScheduleId    = scheduleId,
                 });
             }
         }
@@ -71,7 +88,17 @@ public sealed class CommandLogService
         var filter = BuildJobFilter(cmd);
         return $"""
             SELECT j.name,
-                   ja.next_scheduled_run_date
+                   ja.next_scheduled_run_date,
+                   (SELECT TOP 1 s.schedule_id
+                    FROM msdb.dbo.sysjobschedules js2
+                        INNER JOIN msdb.dbo.sysschedules s ON js2.schedule_id = s.schedule_id
+                    WHERE js2.job_id = j.job_id
+                      AND s.enabled = 1
+                    ORDER BY ABS(CAST(s.active_start_time AS bigint) -
+                                 CAST(DATEPART(hour,   ja.next_scheduled_run_date) * 10000
+                                    + DATEPART(minute, ja.next_scheduled_run_date) * 100
+                                    + DATEPART(second, ja.next_scheduled_run_date) AS bigint))
+                   ) AS schedule_id
             FROM msdb.dbo.sysjobactivity ja
                 INNER JOIN msdb.dbo.sysjobs j ON ja.job_id = j.job_id
             WHERE ja.session_id = (SELECT MAX(session_id) FROM msdb.dbo.syssessions)

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -24,6 +25,13 @@ public partial class DayDetailControl : UserControl
     private readonly DispatcherTimer _clockTimer   = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private Rectangle? _timeLine;
+
+    // Drag state for scheduled bars
+    private Rectangle?    _dragBar;
+    private ScheduledRun? _dragRun;
+    private double        _dragOffsetX;
+    private double        _dragOriginalX;
+    private bool          _dragMoved;
 
     public DayDetailControl()
     {
@@ -338,7 +346,7 @@ public partial class DayDetailControl : UserControl
             DayCanvas.Children.Add(rect);
         }
 
-        // Scheduled (next-run) hollow bars
+        // Scheduled (next-run) hollow bars — draggable when schedule_id is known
         foreach (var sr in scheduled)
         {
             var estDuration = avgDurations.TryGetValue(sr.RowIndex, out var avg)
@@ -358,10 +366,23 @@ public partial class DayDetailControl : UserControl
                 Stroke          = new SolidColorBrush(Color.Parse("#E74C3C")),
                 StrokeThickness = 1.5,
                 Opacity         = 0.6,
+                Cursor          = sr.ScheduleId > 0
+                    ? new Cursor(StandardCursorType.SizeWestEast)
+                    : Cursor.Default,
             };
             Canvas.SetLeft(hollow, x);
             Canvas.SetTop(hollow, y);
-            ToolTip.SetTip(hollow, $"{sr.JobLabel}\n{sr.ServerName}\nScheduled: {sr.ScheduledTime:HH:mm}");
+            ToolTip.SetTip(hollow,
+                $"{sr.JobLabel}\n{sr.ServerName}\nScheduled: {sr.ScheduledTime:HH:mm}" +
+                (sr.ScheduleId > 0 ? "\nDrag to reschedule" : ""));
+
+            if (sr.ScheduleId > 0)
+            {
+                hollow.PointerPressed  += (_, e) => OnDragStart(hollow, sr, e);
+                hollow.PointerMoved    += (_, e) => OnDragMove(hollow, e);
+                hollow.PointerReleased += async (_, e) => await OnDragEnd(hollow, sr, e);
+            }
+
             DayCanvas.Children.Add(hollow);
         }
 
@@ -482,6 +503,130 @@ public partial class DayDetailControl : UserControl
             sp.Children.Add(lbl);
             ServerStatusPanel.Children.Add(sp);
         }
+    }
+
+    private void OnDragStart(Rectangle bar, ScheduledRun run, PointerPressedEventArgs e)
+    {
+        if (_dragBar is not null) return;
+        _dragBar       = bar;
+        _dragRun       = run;
+        _dragOffsetX   = e.GetPosition(DayCanvas).X - Canvas.GetLeft(bar);
+        _dragOriginalX = Canvas.GetLeft(bar);
+        _dragMoved     = false;
+        bar.Fill            = new SolidColorBrush(Color.Parse("#F1C40F"));
+        bar.Stroke          = null;
+        bar.StrokeThickness = 0;
+        bar.Opacity         = 0.9;
+        e.Pointer.Capture(bar);
+        e.Handled = true;
+    }
+
+    private void OnDragMove(Rectangle bar, PointerEventArgs e)
+    {
+        if (_dragBar != bar) return;
+        double newX = Math.Clamp(e.GetPosition(DayCanvas).X - _dragOffsetX, 0, CanvasW - bar.Width);
+        Canvas.SetLeft(bar, newX);
+        _dragMoved = Math.Abs(newX - _dragOriginalX) > 2;
+        e.Handled = true;
+    }
+
+    private async Task OnDragEnd(Rectangle bar, ScheduledRun run, PointerReleasedEventArgs e)
+    {
+        if (_dragBar != bar) return;
+        e.Pointer.Capture(null);
+        _dragBar = null;
+        _dragRun = null;
+        e.Handled = true;
+
+        if (!_dragMoved)
+            return; // just a click — bar stays yellow as selected
+
+        // Snap to nearest 5-minute mark
+        double x        = Canvas.GetLeft(bar);
+        int snapped     = Math.Clamp((int)Math.Round(x / 5) * 5, 0, 1439);
+        Canvas.SetLeft(bar, snapped);
+
+        var newTime = TimeSpan.FromMinutes(snapped);
+        bool confirmed = await ShowRescheduleConfirmAsync(run, newTime);
+        if (confirmed)
+        {
+            try   { await _service.RescheduleAsync(run.ServerName, run.ScheduleId, newTime); }
+            catch { /* error visible after reload */ }
+            await LoadAsync();
+        }
+        else
+        {
+            Canvas.SetLeft(bar, _dragOriginalX);
+            bar.Fill            = Brushes.Transparent;
+            bar.Stroke          = new SolidColorBrush(Color.Parse("#E74C3C"));
+            bar.StrokeThickness = 1.5;
+            bar.Opacity         = 0.6;
+        }
+    }
+
+    private async Task<bool> ShowRescheduleConfirmAsync(ScheduledRun run, TimeSpan newTime)
+    {
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner is null) return false;
+
+        var tcs = new TaskCompletionSource<bool>();
+
+        var msg = new TextBlock
+        {
+            Text = $"Reschedule job on {run.ServerName}\n\n" +
+                   $"  {run.JobLabel}\n\n" +
+                   $"  from  {run.ScheduledTime:HH:mm}  →  {newTime.Hours:00}:{newTime.Minutes:00}",
+            Foreground   = new SolidColorBrush(Color.Parse("#E4E6EB")),
+            FontSize     = 13,
+            Margin       = new Thickness(20, 20, 20, 20),
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+        };
+
+        var okBtn = new Button
+        {
+            Content = "Reschedule",
+            Width   = 110,
+            Margin  = new Thickness(0, 0, 8, 0),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+        };
+        var cancelBtn = new Button
+        {
+            Content = "Cancel",
+            Width   = 80,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+        };
+
+        var btnRow = new StackPanel
+        {
+            Orientation         = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin              = new Thickness(0, 0, 20, 16),
+        };
+        btnRow.Children.Add(okBtn);
+        btnRow.Children.Add(cancelBtn);
+
+        var layout = new StackPanel();
+        layout.Children.Add(msg);
+        layout.Children.Add(btnRow);
+
+        var dialog = new Window
+        {
+            Title                 = "Reschedule Job",
+            Width                 = 360,
+            SizeToContent         = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background            = new SolidColorBrush(Color.Parse("#1A1D23")),
+            CanResize             = false,
+            ShowInTaskbar         = false,
+            Content               = layout,
+        };
+
+        okBtn.Click     += (_, _) => { tcs.TrySetResult(true);  dialog.Close(); };
+        cancelBtn.Click += (_, _) => { tcs.TrySetResult(false); dialog.Close(); };
+        dialog.Closed   += (_, _) =>   tcs.TrySetResult(false);
+
+        await dialog.ShowDialog(owner);
+        return await tcs.Task;
     }
 
     private static string FormatDuration(TimeSpan ts)
