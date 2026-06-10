@@ -19,6 +19,8 @@ public partial class DayDetailControl : UserControl
 
     private readonly CommandLogService _service = new();
     private CancellationTokenSource? _cts;
+    private IReadOnlyDictionary<(string Server, string JobLabel), string> _stepCommands =
+        new Dictionary<(string, string), string>();
     private readonly DispatcherTimer _clockTimer   = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private Rectangle? _timeLine;
@@ -47,7 +49,14 @@ public partial class DayDetailControl : UserControl
     protected override void OnLoaded(RoutedEventArgs e)
     {
         base.OnLoaded(e);
+        _ = LoadStepCommandsAsync();
         _ = LoadAsync();
+    }
+
+    private async Task LoadStepCommandsAsync()
+    {
+        _stepCommands = await _service.LoadJobStepCommandsAsync();
+        PopulateLabelPanel();
     }
 
     private void UpdateClock()
@@ -129,10 +138,24 @@ public partial class DayDetailControl : UserControl
             border.Child = grid;
             Canvas.SetLeft(border, 0);
             Canvas.SetTop(border, HeaderH + i * RowH);
+            ToolTip.SetTip(border, BuildRowTooltip(row));
             LabelCanvas.Children.Add(border);
         }
 
         LabelCanvas.Height = HeaderH + ServerList.AllRows.Count * RowH;
+    }
+
+    private string BuildRowTooltip(JobRow row)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(row.JobLabel);
+        sb.AppendLine(row.ServerName);
+        if (_stepCommands.TryGetValue((row.ServerName, row.JobLabel), out var cmd))
+        {
+            sb.AppendLine();
+            sb.Append(cmd);
+        }
+        return sb.ToString().TrimEnd();
     }
 
     private static TextBlock MakeHeaderTb(string text, int col)

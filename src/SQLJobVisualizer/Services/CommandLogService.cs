@@ -236,6 +236,58 @@ public sealed class CommandLogService
         return list;
     }
 
+    public async Task<IReadOnlyDictionary<(string Server, string JobLabel), string>>
+        LoadJobStepCommandsAsync(CancellationToken ct = default)
+    {
+        var tasks = ServerList.ServerNames
+            .Select(s => QueryJobStepsAsync(s, ct))
+            .ToArray();
+        var results = await Task.WhenAll(tasks);
+        return results
+            .SelectMany(r => r)
+            .ToDictionary(r => (r.Server, r.JobLabel), r => r.Command);
+    }
+
+    private static async Task<List<(string Server, string JobLabel, string Command)>> QueryJobStepsAsync(
+        string serverName, CancellationToken ct)
+    {
+        var list = new List<(string, string, string)>();
+        try
+        {
+            await using var conn = new SqlConnection(ServerList.GetConnectionString(serverName));
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 10;
+            cmd.CommandText    = BuildJobStepQuery(cmd);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var jobName  = reader.GetString(0);
+                var stepCmd  = reader.GetString(1);
+                var jobLabel = JobParser.ParseJobLabel(jobName, "");
+                if (jobLabel is not null)
+                    list.Add((serverName, jobLabel, stepCmd));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await Console.Error.WriteLineAsync($"[steps:{serverName}] {ex.Message}");
+        }
+        return list;
+    }
+
+    private static string BuildJobStepQuery(SqlCommand cmd)
+    {
+        var filter = BuildJobFilter(cmd);
+        return $"""
+            SELECT j.name, js.command
+            FROM msdb.dbo.sysjobs j
+                INNER JOIN msdb.dbo.sysjobsteps js ON j.job_id = js.job_id
+            WHERE js.step_id = 1
+              AND {filter}
+            """;
+    }
+
     private static string BuildJobFilter(SqlCommand cmd)
     {
         var jobs = ServerList.Jobs;
