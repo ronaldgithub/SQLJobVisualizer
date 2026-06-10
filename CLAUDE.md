@@ -1,6 +1,7 @@
 # SQLJobVisualizer — Claude Code Guide
 
-**Author:** Ronald de Groot — ronald.de.groot@opendata.nl
+**Author:** Ronald de Groot — ronald.de.groot@opendata.nl  
+**Website:** https://dbaronald.nl/sql-server-agent-job-visualizer/
 
 ## Build & Run
 
