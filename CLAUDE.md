@@ -1,5 +1,7 @@
 # SQLJobVisualizer — Claude Code Guide
 
+**Author:** Ronald de Groot — ronald.de.groot@opendata.nl
+
 ## Build & Run
 
 ```bash

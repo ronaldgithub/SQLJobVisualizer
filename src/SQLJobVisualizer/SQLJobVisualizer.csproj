@@ -7,6 +7,10 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <Authors>Ronald de Groot</Authors>
+    <Company>opendata.nl</Company>
+    <Copyright>Copyright © Ronald de Groot</Copyright>
+    <PackageProjectUrl>mailto:ronald.de.groot@opendata.nl</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>

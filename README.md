@@ -95,3 +95,7 @@ config.json           Created on first run; edit to configure servers and jobs
 | SQL client | Microsoft.Data.SqlClient 5.2.2 |
 | Architecture | Code-behind, no MVVM framework |
 | Theme | Fluent Dark + custom resource dictionary |
+
+## Author
+
+Ronald de Groot — ronald.de.groot@opendata.nl
