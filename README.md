@@ -18,7 +18,8 @@ A dark-mode desktop application for visualizing SQL Server Agent maintenance job
 - **Drag-to-reschedule** — Scheduled jobs appear as hollow outlined bars. Drag one left or right to a new start time (snaps to 5-minute marks), confirm in the dialog, and the SQL Agent schedule is updated immediately via `msdb.dbo.sp_update_schedule` — no need to open SSMS. Saves significant DBA time when redistributing load across the day.
 - **Multiple servers in parallel** — Queries all configured servers simultaneously. If one server is unreachable the others still load; a colour-coded dot in the toolbar shows each server's status.
 - **Hover tooltips** — Every cell and bar shows server name, job type, start time, end time, and duration. For a **running job** the tooltip also shows live progress: spid, database name, command, and percent complete. Hovering a **row label** shows the actual T-SQL from the SQL Agent job step.
-- **Config file** — Servers and job definitions are read from `config.json` next to the exe. No recompile needed to add servers or jobs.
+- **Config file** — Servers and curated maintenance job definitions are read from `config.json` next to the exe. No recompile needed to add servers or curated jobs.
+- **Dynamic job discovery** — Turn on **Show all SQL Agent jobs** in the toolbar to include additional jobs found for the selected date or week without editing `config.json`.
 
 ## Jobs Visualized
 
@@ -32,7 +33,7 @@ Out of the box the app is configured for [Ola Hallengren's](https://ola.hallengr
 | IndexOptimize | `IndexOptimize%` |
 | IntegrityCheck | `DatabaseIntegrityCheck%` |
 
-Any SQL Server Agent job can be added by editing `config.json`.
+Curated jobs can be added by editing `config.json`. To spot overlaps with extra jobs without changing configuration, enable **Show all SQL Agent jobs** in the Week Overview or Day Detail toolbar.
 
 ## Requirements
 
@@ -68,10 +69,12 @@ Any SQL Server Agent job can be added by editing `config.json`.
    }
    ```
 
-   - `servers` — hostnames or IP addresses; Windows auth is used, no credentials in the file.
-   - `sqlPattern` — SQL `LIKE` pattern matched against `msdb.dbo.sysjobs.name`.
-   - `label` — display name used in tooltips.
-   - `shortLabel` — abbreviated name shown in the row label panel.
+    - `servers` — hostnames or IP addresses; Windows auth is used, no credentials in the file.
+    - `sqlPattern` — SQL `LIKE` pattern matched against `msdb.dbo.sysjobs.name`.
+    - `label` — display name used in tooltips.
+    - `shortLabel` — abbreviated name shown in the row label panel.
+
+    Extra SQL Agent jobs do not need to be added here unless you want them shown by default as curated rows. Use **Show all SQL Agent jobs** to discover them dynamically per server for the selected date or week.
 
 4. Restart the app after editing `config.json`.
 

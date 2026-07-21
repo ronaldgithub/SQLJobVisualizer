@@ -18,6 +18,7 @@ public partial class WeekMatrixControl : UserControl
     private DateTime _weekStart;
     private readonly CommandLogService _service = new();
     private CancellationTokenSource? _cts;
+    private JobRowCatalog _rowCatalog = JobRowCatalog.FromConfigured();
     private IReadOnlyDictionary<(string Server, string JobLabel), string> _stepCommands =
         new Dictionary<(string, string), string>();
 
@@ -30,6 +31,11 @@ public partial class WeekMatrixControl : UserControl
         PrevWeekButton.Click += (_, _) => NavigateWeek(-1);
         NextWeekButton.Click += (_, _) => NavigateWeek(1);
         RefreshButton.Click  += (_, _) => _ = LoadAsync();
+        ShowAllJobsCheckBox.IsCheckedChanged += (_, _) =>
+        {
+            _ = LoadStepCommandsAsync();
+            _ = LoadAsync();
+        };
     }
 
     protected override void OnLoaded(RoutedEventArgs e)
@@ -41,7 +47,7 @@ public partial class WeekMatrixControl : UserControl
 
     private async Task LoadStepCommandsAsync()
     {
-        _stepCommands = await _service.LoadJobStepCommandsAsync();
+        _stepCommands = await _service.LoadJobStepCommandsAsync(IsShowingAllJobs());
         PopulateLabelPanel();
     }
 
@@ -82,9 +88,9 @@ public partial class WeekMatrixControl : UserControl
 
         // Data rows — y matches HeaderH + rowIndex * CellH exactly
         string? lastJob = null;
-        for (int i = 0; i < ServerList.AllRows.Count; i++)
+        for (int i = 0; i < _rowCatalog.AllRows.Count; i++)
         {
-            var row = ServerList.AllRows[i];
+            var row = _rowCatalog.AllRows[i];
             bool isGroupStart = row.JobLabel != lastJob;
             lastJob = row.JobLabel;
 
@@ -131,7 +137,7 @@ public partial class WeekMatrixControl : UserControl
             LabelCanvas.Children.Add(border);
         }
 
-        LabelCanvas.Height = HeaderH + ServerList.AllRows.Count * CellH;
+        LabelCanvas.Height = HeaderH + _rowCatalog.AllRows.Count * CellH;
     }
 
     private string BuildRowTooltip(JobRow row)
@@ -173,11 +179,17 @@ public partial class WeekMatrixControl : UserControl
 
         try
         {
-            var (entries, failedServers) = await _service.LoadWeekAsync(weekStart, ct);
+            bool includeAllJobs = IsShowingAllJobs();
+            var (entries, failedServers) = await _service.LoadWeekAsync(weekStart, includeAllJobs, ct);
             if (ct.IsCancellationRequested) return;
 
-            var slots = BuildSlots(entries, weekStart);
-            RenderMatrix(slots, weekStart);
+            _rowCatalog = includeAllJobs
+                ? JobRowCatalog.FromEntries(entries)
+                : JobRowCatalog.FromConfigured();
+            PopulateLabelPanel();
+
+            var slots = BuildSlots(entries, weekStart, _rowCatalog, includeAllJobs);
+            RenderMatrix(slots, weekStart, _rowCatalog);
             UpdateServerStatus(failedServers);
         }
         catch (OperationCanceledException) { }
@@ -191,15 +203,17 @@ public partial class WeekMatrixControl : UserControl
         }
     }
 
-    private static List<JobSlot> BuildSlots(List<CommandLogEntry> entries, DateTime weekStart)
+    private static List<JobSlot> BuildSlots(
+        List<CommandLogEntry> entries, DateTime weekStart,
+        JobRowCatalog rowCatalog, bool includeAllJobs)
     {
         var slots = new List<JobSlot>();
         foreach (var entry in entries)
         {
-            var jobLabel = JobParser.ParseJobLabel(entry.CommandType, entry.Command);
+            var jobLabel = JobParser.ParseJobLabel(entry.CommandType, entry.Command, includeAllJobs);
             if (jobLabel is null) continue;
 
-            int rowIdx = ServerList.GetRowIndex(entry.ServerName, jobLabel);
+            int rowIdx = rowCatalog.GetRowIndex(entry.ServerName, jobLabel);
             if (rowIdx < 0) continue;
 
             int startHour = (int)(entry.StartTime - weekStart).TotalHours;
@@ -215,7 +229,7 @@ public partial class WeekMatrixControl : UserControl
             {
                 slots.Add(new JobSlot
                 {
-                    Row        = ServerList.AllRows[rowIdx],
+                    Row        = rowCatalog.AllRows[rowIdx],
                     RowIndex   = rowIdx,
                     HourOffset = h,
                     Success    = success,
@@ -228,14 +242,12 @@ public partial class WeekMatrixControl : UserControl
         return slots;
     }
 
-    private void RenderMatrix(List<JobSlot> slots, DateTime weekStart)
+    private void RenderMatrix(List<JobSlot> slots, DateTime weekStart, JobRowCatalog rowCatalog)
     {
         MatrixCanvas.Children.Clear();
 
         const int totalCols = 168;
-        int totalRows = ServerList.AllRows.Count;
-        int jobCount  = ServerList.JobLabels.Length;
-        int srvCount  = ServerList.ServerNames.Length;
+        int totalRows = rowCatalog.AllRows.Count;
         double canvasW = totalCols * CellW;
         double canvasH = HeaderH + totalRows * CellH;
 
@@ -250,8 +262,13 @@ public partial class WeekMatrixControl : UserControl
 
         // Alternating group backgrounds
         string[] groupBg = ["#1A1D23", "#1D2028"];
-        for (int g = 0; g < jobCount; g++)
-            AddRect(0, HeaderH + g * srvCount * CellH, canvasW, srvCount * CellH, groupBg[g % 2]);
+        int groupIndex = 0;
+        foreach (var group in rowCatalog.GetGroups())
+        {
+            AddRect(0, HeaderH + group.StartIndex * CellH, canvasW, group.RowCount * CellH,
+                groupBg[groupIndex % 2]);
+            groupIndex++;
+        }
 
         // Day column headers and separators
         string[] dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -297,8 +314,8 @@ public partial class WeekMatrixControl : UserControl
         AddRect(0, HeaderH - 1, canvasW, 1, "#3A3D45");
 
         // Job-group separators
-        for (int g = 1; g < jobCount; g++)
-            AddRect(0, HeaderH + g * srvCount * CellH, canvasW, 2, "#3A3D45");
+        foreach (var group in rowCatalog.GetGroups().Skip(1))
+            AddRect(0, HeaderH + group.StartIndex * CellH, canvasW, 2, "#3A3D45");
 
         // Faint 6-hour grid lines inside days
         for (int h = 6; h < totalCols; h += 6)
@@ -433,6 +450,8 @@ public partial class WeekMatrixControl : UserControl
             ServerStatusPanel.Children.Add(sp);
         }
     }
+
+    private bool IsShowingAllJobs() => ShowAllJobsCheckBox.IsChecked == true;
 
     private static DateTime GetWeekMonday(DateTime date)
     {
