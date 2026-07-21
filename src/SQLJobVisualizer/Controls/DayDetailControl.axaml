@@ -16,6 +16,11 @@
                                Foreground="{DynamicResource ForegroundBrush}" FontSize="13"/>
                     <CalendarDatePicker x:Name="DatePicker" />
                     <Button x:Name="RefreshButton" Content="⟳ Refresh" Margin="8,0,0,0" />
+                    <CheckBox x:Name="ShowAllJobsCheckBox"
+                              Content="Show all SQL Agent jobs"
+                              VerticalAlignment="Center"
+                              Foreground="{DynamicResource ForegroundBrush}"
+                              Margin="12,0,0,0" />
                     <StackPanel x:Name="ServerStatusPanel"
                                 Orientation="Horizontal"
                                 Spacing="4"

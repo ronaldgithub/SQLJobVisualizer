@@ -20,6 +20,7 @@ public partial class DayDetailControl : UserControl
 
     private readonly CommandLogService _service = new();
     private CancellationTokenSource? _cts;
+    private JobRowCatalog _rowCatalog = JobRowCatalog.FromConfigured();
     private IReadOnlyDictionary<(string Server, string JobLabel), string> _stepCommands =
         new Dictionary<(string, string), string>();
     private readonly DispatcherTimer _clockTimer   = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -41,6 +42,11 @@ public partial class DayDetailControl : UserControl
         DatePicker.SelectedDate        =  DateTime.Today;
         DatePicker.SelectedDateChanged += (_, _) => _ = LoadAsync();
         RefreshButton.Click            += (_, _) => _ = LoadAsync();
+        ShowAllJobsCheckBox.IsCheckedChanged += (_, _) =>
+        {
+            _ = LoadStepCommandsAsync();
+            _ = LoadAsync();
+        };
 
         _clockTimer.Tick += (_, _) => UpdateClock();
         _clockTimer.Start();
@@ -63,7 +69,7 @@ public partial class DayDetailControl : UserControl
 
     private async Task LoadStepCommandsAsync()
     {
-        _stepCommands = await _service.LoadJobStepCommandsAsync();
+        _stepCommands = await _service.LoadJobStepCommandsAsync(IsShowingAllJobs());
         PopulateLabelPanel();
     }
 
@@ -101,9 +107,9 @@ public partial class DayDetailControl : UserControl
 
         // Data rows — y matches HeaderH + rowIndex * RowH exactly
         string? lastJob = null;
-        for (int i = 0; i < ServerList.AllRows.Count; i++)
+        for (int i = 0; i < _rowCatalog.AllRows.Count; i++)
         {
-            var row = ServerList.AllRows[i];
+            var row = _rowCatalog.AllRows[i];
             bool isGroupStart = row.JobLabel != lastJob;
             lastJob = row.JobLabel;
 
@@ -150,7 +156,7 @@ public partial class DayDetailControl : UserControl
             LabelCanvas.Children.Add(border);
         }
 
-        LabelCanvas.Height = HeaderH + ServerList.AllRows.Count * RowH;
+        LabelCanvas.Height = HeaderH + _rowCatalog.AllRows.Count * RowH;
     }
 
     private string BuildRowTooltip(JobRow row)
@@ -192,12 +198,13 @@ public partial class DayDetailControl : UserControl
         try
         {
             var day = DatePicker.SelectedDate?.Date ?? DateTime.Today;
+            bool includeAllJobs = IsShowingAllJobs();
 
-            var completedTask  = _service.LoadDayAsync(day, ct);
+            var completedTask  = _service.LoadDayAsync(day, includeAllJobs, ct);
             var runningTask    = day == DateTime.Today
-                ? _service.LoadRunningAsync(ct)
+                ? _service.LoadRunningAsync(includeAllJobs, ct)
                 : Task.FromResult<(List<CommandLogEntry>, IReadOnlyList<string>)>(([], []));
-            var scheduledTask  = _service.LoadScheduledAsync(day, ct);
+            var scheduledTask  = _service.LoadScheduledAsync(day, includeAllJobs, ct);
 
             await Task.WhenAll(completedTask, runningTask, scheduledTask);
             if (ct.IsCancellationRequested) return;
@@ -216,7 +223,24 @@ public partial class DayDetailControl : UserControl
                 .ToList();
 
             var failedServers = failedCompleted.Concat(failedRunning).Distinct().ToList();
-            var executions    = BuildExecutions(merged, day);
+            _rowCatalog = includeAllJobs
+                ? JobRowCatalog.FromEntries(merged, scheduled)
+                : JobRowCatalog.FromConfigured();
+            PopulateLabelPanel();
+
+            var executions    = BuildExecutions(merged, day, _rowCatalog, includeAllJobs);
+            var scheduledRows = scheduled
+                .Select(s => new ScheduledRun
+                {
+                    ServerName = s.ServerName,
+                    JobLabel = s.JobLabel,
+                    RowIndex = _rowCatalog.GetRowIndex(s.ServerName, s.JobLabel),
+                    ScheduledTime = s.ScheduledTime,
+                    EstimatedDuration = s.EstimatedDuration,
+                    ScheduleId = s.ScheduleId,
+                })
+                .Where(s => s.RowIndex >= 0)
+                .ToList();
 
             // Average historical duration per row — used to size scheduled bars
             var avgDurations = executions
@@ -225,7 +249,7 @@ public partial class DayDetailControl : UserControl
                 .ToDictionary(g => g.Key,
                     g => TimeSpan.FromSeconds(g.Average(e => e.Duration.TotalSeconds)));
 
-            RenderDay(executions, scheduled, avgDurations, day);
+            RenderDay(executions, scheduledRows, avgDurations, day, _rowCatalog);
             UpdateServerStatus(failedServers);
         }
         catch (OperationCanceledException) { }
@@ -239,15 +263,17 @@ public partial class DayDetailControl : UserControl
         }
     }
 
-    private static List<JobExecution> BuildExecutions(List<CommandLogEntry> entries, DateTime day)
+    private static List<JobExecution> BuildExecutions(
+        List<CommandLogEntry> entries, DateTime day,
+        JobRowCatalog rowCatalog, bool includeAllJobs)
     {
         var list = new List<JobExecution>();
         foreach (var entry in entries)
         {
-            var jobLabel = JobParser.ParseJobLabel(entry.CommandType, entry.Command);
+            var jobLabel = JobParser.ParseJobLabel(entry.CommandType, entry.Command, includeAllJobs);
             if (jobLabel is null) continue;
 
-            int rowIdx = ServerList.GetRowIndex(entry.ServerName, jobLabel);
+            int rowIdx = rowCatalog.GetRowIndex(entry.ServerName, jobLabel);
             if (rowIdx < 0) continue;
 
             // Still-running jobs: use current time as provisional end time
@@ -255,7 +281,7 @@ public partial class DayDetailControl : UserControl
 
             list.Add(new JobExecution
             {
-                Row       = ServerList.AllRows[rowIdx],
+                Row       = rowCatalog.AllRows[rowIdx],
                 RowIndex  = rowIdx,
                 StartTime = entry.StartTime,
                 EndTime   = endTime,
@@ -268,13 +294,12 @@ public partial class DayDetailControl : UserControl
     }
 
     private void RenderDay(List<JobExecution> executions, List<ScheduledRun> scheduled,
-                           Dictionary<int, TimeSpan> avgDurations, DateTime day)
+                           Dictionary<int, TimeSpan> avgDurations, DateTime day,
+                           JobRowCatalog rowCatalog)
     {
         DayCanvas.Children.Clear();
 
-        int totalRows = ServerList.AllRows.Count;
-        int jobCount  = ServerList.JobLabels.Length;
-        int srvCount  = ServerList.ServerNames.Length;
+        int totalRows = rowCatalog.AllRows.Count;
         double canvasH = HeaderH + totalRows * RowH;
 
         DayCanvas.Width  = CanvasW;
@@ -288,8 +313,13 @@ public partial class DayDetailControl : UserControl
 
         // Alternating row group backgrounds
         string[] groupBg = ["#1A1D23", "#1D2028"];
-        for (int g = 0; g < jobCount; g++)
-            AddRect(0, HeaderH + g * srvCount * RowH, CanvasW, srvCount * RowH, groupBg[g % 2]);
+        int groupIndex = 0;
+        foreach (var group in rowCatalog.GetGroups())
+        {
+            AddRect(0, HeaderH + group.StartIndex * RowH, CanvasW, group.RowCount * RowH,
+                groupBg[groupIndex % 2]);
+            groupIndex++;
+        }
 
         // Hour header labels and vertical grid lines
         for (int h = 0; h <= 24; h++)
@@ -317,8 +347,8 @@ public partial class DayDetailControl : UserControl
         AddRect(0, HeaderH - 1, CanvasW, 1, "#3A3D45");
 
         // Job-group separators
-        for (int g = 1; g < jobCount; g++)
-            AddRect(0, HeaderH + g * srvCount * RowH, CanvasW, 2, "#3A3D45");
+        foreach (var group in rowCatalog.GetGroups().Skip(1))
+            AddRect(0, HeaderH + group.StartIndex * RowH, CanvasW, 2, "#3A3D45");
 
         // Job execution bars
         foreach (var ex in executions)
@@ -504,6 +534,8 @@ public partial class DayDetailControl : UserControl
             ServerStatusPanel.Children.Add(sp);
         }
     }
+
+    private bool IsShowingAllJobs() => ShowAllJobsCheckBox.IsChecked == true;
 
     private void OnDragStart(Rectangle bar, ScheduledRun run, PointerPressedEventArgs e)
     {

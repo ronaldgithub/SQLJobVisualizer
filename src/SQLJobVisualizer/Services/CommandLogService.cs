@@ -7,17 +7,19 @@ namespace SQLJobVisualizer.Services;
 public sealed class CommandLogService
 {
     public async Task<(List<CommandLogEntry> Entries, IReadOnlyList<string> FailedServers)>
-        LoadWeekAsync(DateTime weekStart, CancellationToken ct = default) =>
+        LoadWeekAsync(DateTime weekStart, bool includeAllJobs = false, CancellationToken ct = default) =>
         await QueryRangeAsync(
             int.Parse(weekStart.ToString("yyyyMMdd")),
             int.Parse(weekStart.AddDays(6).ToString("yyyyMMdd")),
+            includeAllJobs,
             ct);
 
     public async Task<(List<CommandLogEntry> Entries, IReadOnlyList<string> FailedServers)>
-        LoadDayAsync(DateTime day, CancellationToken ct = default) =>
+        LoadDayAsync(DateTime day, bool includeAllJobs = false, CancellationToken ct = default) =>
         await QueryRangeAsync(
             int.Parse(day.Date.ToString("yyyyMMdd")),
             int.Parse(day.Date.ToString("yyyyMMdd")),
+            includeAllJobs,
             ct);
 
     public async Task RescheduleAsync(string serverName, int scheduleId, TimeSpan newTime,
@@ -35,17 +37,18 @@ public sealed class CommandLogService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<List<ScheduledRun>> LoadScheduledAsync(DateTime day, CancellationToken ct = default)
+    public async Task<List<ScheduledRun>> LoadScheduledAsync(
+        DateTime day, bool includeAllJobs = false, CancellationToken ct = default)
     {
         var tasks   = ServerList.ServerNames
-            .Select(s => QueryScheduledAsync(s, day, ct))
+            .Select(s => QueryScheduledAsync(s, day, includeAllJobs, ct))
             .ToArray();
         var results = await Task.WhenAll(tasks);
         return results.SelectMany(r => r).ToList();
     }
 
     private static async Task<List<ScheduledRun>> QueryScheduledAsync(
-        string serverName, DateTime day, CancellationToken ct)
+        string serverName, DateTime day, bool includeAllJobs, CancellationToken ct)
     {
         var list = new List<ScheduledRun>();
         try
@@ -55,22 +58,20 @@ public sealed class CommandLogService
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 10;
             cmd.Parameters.AddWithValue("@Day", day.Date);
-            cmd.CommandText = BuildScheduledQuery(cmd);
+            cmd.CommandText = BuildScheduledQuery(cmd, includeAllJobs);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
                 var jobName       = reader.GetString(0);
                 var scheduledTime = reader.GetDateTime(1);
                 var scheduleId    = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
-                var jobLabel      = JobParser.ParseJobLabel(jobName, "");
+                var jobLabel      = JobParser.ParseJobLabel(jobName, "", includeAllJobs);
                 if (jobLabel is null) continue;
-                int rowIdx = ServerList.GetRowIndex(serverName, jobLabel);
-                if (rowIdx < 0) continue;
                 list.Add(new ScheduledRun
                 {
                     ServerName    = serverName,
                     JobLabel      = jobLabel,
-                    RowIndex      = rowIdx,
+                    RowIndex      = -1,
                     ScheduledTime = scheduledTime,
                     ScheduleId    = scheduleId,
                 });
@@ -83,9 +84,9 @@ public sealed class CommandLogService
         return list;
     }
 
-    private static string BuildScheduledQuery(SqlCommand cmd)
+    private static string BuildScheduledQuery(SqlCommand cmd, bool includeAllJobs)
     {
-        var filter = BuildJobFilter(cmd);
+        var filter = BuildJobFilter(cmd, includeAllJobs);
         return $"""
             SELECT j.name,
                    ja.next_scheduled_run_date,
@@ -110,11 +111,11 @@ public sealed class CommandLogService
     }
 
     public async Task<(List<CommandLogEntry> Entries, IReadOnlyList<string> FailedServers)>
-        LoadRunningAsync(CancellationToken ct = default)
+        LoadRunningAsync(bool includeAllJobs = false, CancellationToken ct = default)
     {
         var failed  = new ConcurrentBag<(string Server, string Error)>();
         var tasks   = ServerList.ServerNames
-            .Select(s => QueryRunningAsync(s, failed, ct))
+            .Select(s => QueryRunningAsync(s, includeAllJobs, failed, ct))
             .ToArray();
         var results = await Task.WhenAll(tasks);
         return (results.SelectMany(r => r).ToList(),
@@ -122,7 +123,8 @@ public sealed class CommandLogService
     }
 
     private static async Task<List<CommandLogEntry>> QueryRunningAsync(
-        string serverName, ConcurrentBag<(string, string)> failed, CancellationToken ct)
+        string serverName, bool includeAllJobs,
+        ConcurrentBag<(string, string)> failed, CancellationToken ct)
     {
         var list = new List<CommandLogEntry>();
         try
@@ -132,7 +134,7 @@ public sealed class CommandLogService
 
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 10;
-            cmd.CommandText    = BuildRunningQuery(cmd);
+            cmd.CommandText    = BuildRunningQuery(cmd, includeAllJobs);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
@@ -214,11 +216,11 @@ public sealed class CommandLogService
         """;
 
     private static async Task<(List<CommandLogEntry>, IReadOnlyList<string>)>
-        QueryRangeAsync(int fromDate, int toDate, CancellationToken ct)
+        QueryRangeAsync(int fromDate, int toDate, bool includeAllJobs, CancellationToken ct)
     {
         var failed = new ConcurrentBag<(string Server, string Error)>();
         var tasks  = ServerList.ServerNames
-            .Select(s => QueryServerAsync(s, fromDate, toDate, failed, ct))
+            .Select(s => QueryServerAsync(s, fromDate, toDate, includeAllJobs, failed, ct))
             .ToArray();
         var results = await Task.WhenAll(tasks);
         return (results.SelectMany(r => r).ToList(),
@@ -227,7 +229,7 @@ public sealed class CommandLogService
 
     private static async Task<List<CommandLogEntry>> QueryServerAsync(
         string serverName, int fromDate, int toDate,
-        ConcurrentBag<(string, string)> failed, CancellationToken ct)
+        bool includeAllJobs, ConcurrentBag<(string, string)> failed, CancellationToken ct)
     {
         var list = new List<CommandLogEntry>();
         try
@@ -237,7 +239,7 @@ public sealed class CommandLogService
 
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 30;
-            cmd.CommandText    = BuildRangedQuery(cmd);
+            cmd.CommandText    = BuildRangedQuery(cmd, includeAllJobs);
             cmd.Parameters.AddWithValue("@FromDate", fromDate);
             cmd.Parameters.AddWithValue("@ToDate",   toDate);
 
@@ -264,10 +266,10 @@ public sealed class CommandLogService
     }
 
     public async Task<IReadOnlyDictionary<(string Server, string JobLabel), string>>
-        LoadJobStepCommandsAsync(CancellationToken ct = default)
+        LoadJobStepCommandsAsync(bool includeAllJobs = false, CancellationToken ct = default)
     {
         var tasks = ServerList.ServerNames
-            .Select(s => QueryJobStepsAsync(s, ct))
+            .Select(s => QueryJobStepsAsync(s, includeAllJobs, ct))
             .ToArray();
         var results = await Task.WhenAll(tasks);
         return results
@@ -276,7 +278,7 @@ public sealed class CommandLogService
     }
 
     private static async Task<List<(string Server, string JobLabel, string Command)>> QueryJobStepsAsync(
-        string serverName, CancellationToken ct)
+        string serverName, bool includeAllJobs, CancellationToken ct)
     {
         var list = new List<(string, string, string)>();
         try
@@ -285,13 +287,13 @@ public sealed class CommandLogService
             await conn.OpenAsync(ct);
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 10;
-            cmd.CommandText    = BuildJobStepQuery(cmd);
+            cmd.CommandText    = BuildJobStepQuery(cmd, includeAllJobs);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
                 var jobName  = reader.GetString(0);
                 var stepCmd  = reader.GetString(1);
-                var jobLabel = JobParser.ParseJobLabel(jobName, "");
+                var jobLabel = JobParser.ParseJobLabel(jobName, "", includeAllJobs);
                 if (jobLabel is not null)
                     list.Add((serverName, jobLabel, stepCmd));
             }
@@ -303,9 +305,9 @@ public sealed class CommandLogService
         return list;
     }
 
-    private static string BuildJobStepQuery(SqlCommand cmd)
+    private static string BuildJobStepQuery(SqlCommand cmd, bool includeAllJobs)
     {
-        var filter = BuildJobFilter(cmd);
+        var filter = BuildJobFilter(cmd, includeAllJobs);
         return $"""
             SELECT j.name, js.command
             FROM msdb.dbo.sysjobs j
@@ -315,8 +317,10 @@ public sealed class CommandLogService
             """;
     }
 
-    private static string BuildJobFilter(SqlCommand cmd)
+    private static string BuildJobFilter(SqlCommand cmd, bool includeAllJobs)
     {
+        if (includeAllJobs) return "1=1";
+
         var jobs = ServerList.Jobs;
         if (jobs.Length == 0) return "1=0";
         var parts = new string[jobs.Length];
@@ -329,9 +333,9 @@ public sealed class CommandLogService
         return $"({string.Join(" OR ", parts)})";
     }
 
-    private static string BuildRangedQuery(SqlCommand cmd)
+    private static string BuildRangedQuery(SqlCommand cmd, bool includeAllJobs)
     {
-        var filter = BuildJobFilter(cmd);
+        var filter = BuildJobFilter(cmd, includeAllJobs);
         return $"""
             SELECT
                 j.name                                                     AS CommandType,
@@ -363,9 +367,9 @@ public sealed class CommandLogService
             """;
     }
 
-    private static string BuildRunningQuery(SqlCommand cmd)
+    private static string BuildRunningQuery(SqlCommand cmd, bool includeAllJobs)
     {
-        var filter = BuildJobFilter(cmd);
+        var filter = BuildJobFilter(cmd, includeAllJobs);
         return $"""
             SELECT j.name                       AS CommandType,
                    MAX(ja.start_execution_date) AS StartTime
